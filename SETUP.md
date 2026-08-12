@@ -17,6 +17,10 @@ prototype the judges interact with.
 
 `ffmpeg` is **not** required. `tesseract` is **not** required.
 
+**For the PDF study pack:** Luminara renders it with whatever Chrome or Edge is already installed
+(headless). No PDF library, no service, no account. If neither browser is present the endpoint
+returns the same document as HTML and the app says so rather than pretending it produced a PDF.
+
 ---
 
 ## 1. Backend

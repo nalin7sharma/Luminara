@@ -22,10 +22,35 @@ class Base(DeclarativeBase):
     pass
 
 
+# Columns added after the first release. `create_all` only creates missing
+# tables, so an existing database needs them added explicitly — cheaper and far
+# less alarming than asking anyone to delete their lectures.
+_ADDED_COLUMNS = {
+    "lectures": [
+        ("chunk_count", "INTEGER DEFAULT 0"),
+        ("owner_id", "VARCHAR(64)"),
+        ("class_id", "VARCHAR(64)"),
+        ("published", "BOOLEAN DEFAULT 0"),
+    ],
+}
+
+
+def _apply_column_additions() -> None:
+    with engine.begin() as conn:
+        for table, columns in _ADDED_COLUMNS.items():
+            existing = {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
+            if not existing:
+                continue  # table not created yet; create_all will include the column
+            for name, ddl in columns:
+                if name not in existing:
+                    conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+
+
 def init_db() -> None:
     from . import models  # noqa: F401  (registers the tables)
 
     Base.metadata.create_all(engine)
+    _apply_column_additions()
 
 
 def get_db() -> Iterator[Session]:

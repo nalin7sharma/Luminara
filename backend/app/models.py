@@ -11,7 +11,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -30,6 +30,82 @@ class JsonMixin:
             return json.loads(raw)
         except json.JSONDecodeError:
             return default
+
+
+class User(Base):
+    """A student or a teacher. Deliberately minimal — no profiles, no org."""
+
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(160), default="")
+    email: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(Text, default="")
+    role: Mapped[str] = mapped_column(String(16), default="student")  # student|teacher
+    language: Mapped[str] = mapped_column(String(8), default="en")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    classes_taught: Mapped[list["SchoolClass"]] = relationship(
+        back_populates="teacher", cascade="all, delete-orphan"
+    )
+    memberships: Mapped[list["Membership"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+
+    def as_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "email": self.email,
+            "role": self.role,
+            "language": self.language,
+        }
+
+
+class SchoolClass(Base):
+    """A teacher's class. Students join it with a short code."""
+
+    __tablename__ = "classes"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), default="")
+    subject: Mapped[str] = mapped_column(String(200), default="")
+    join_code: Mapped[str] = mapped_column(String(12), unique=True, index=True)
+    teacher_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    teacher: Mapped[User] = relationship(back_populates="classes_taught")
+    members: Mapped[list["Membership"]] = relationship(
+        back_populates="school_class", cascade="all, delete-orphan"
+    )
+    lectures: Mapped[list["Lecture"]] = relationship(back_populates="school_class")
+
+    def as_dict(self, lecture_count: int | None = None) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "subject": self.subject,
+            "join_code": self.join_code,
+            "teacher_id": self.teacher_id,
+            "teacher_name": self.teacher.name if self.teacher else "",
+            "student_count": len(self.members),
+            "lecture_count": lecture_count if lecture_count is not None else len(self.lectures),
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class Membership(Base):
+    """A student in a class."""
+
+    __tablename__ = "memberships"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    class_id: Mapped[str] = mapped_column(ForeignKey("classes.id", ondelete="CASCADE"))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    joined_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    school_class: Mapped[SchoolClass] = relationship(back_populates="members")
+    user: Mapped[User] = relationship(back_populates="memberships")
 
 
 class Lecture(Base, JsonMixin):
@@ -54,6 +130,18 @@ class Lecture(Base, JsonMixin):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     duration_sec: Mapped[float] = mapped_column(Float, default=0.0)
+    # live sessions only: how many audio chunks were captured and transcribed
+    chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Classroom layer. A lecture with no class_id is a personal one (demo,
+    # your own upload, your own live session) and behaves exactly as before.
+    owner_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    class_id: Mapped[str | None] = mapped_column(
+        ForeignKey("classes.id", ondelete="SET NULL"), nullable=True
+    )
+    published: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    school_class: Mapped["SchoolClass | None"] = relationship(back_populates="lectures")
 
     segments: Mapped[list["TranscriptSegment"]] = relationship(
         back_populates="lecture", cascade="all, delete-orphan", order_by="TranscriptSegment.start"

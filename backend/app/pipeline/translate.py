@@ -111,6 +111,48 @@ def protected_terms(knowledge: dict) -> list[str]:
     return sorted({t for t in terms if t})
 
 
+LIVE_PROMPT = """Translate this line of a university lecture into {language_name} ({language_code}).
+
+Rules:
+- Keep mathematical and complexity notation exactly as written: O(log n), O(1), T(n) = T(n/2) + O(1).
+- Keep standard technical vocabulary in English (algorithm names, data structure names, code identifiers).
+- It is a fragment of live speech and may start or end mid-sentence. Translate it as it is; do not
+  complete it, do not add anything, do not explain.
+- Reply with the translation only.
+
+Line:
+{text}"""
+
+
+def translate_text(text: str, language: str) -> tuple[str, str, str]:
+    """Translate one passage of live speech. Returns (text, engine, error).
+
+    Same provider router and the same protection rules as the notes translation —
+    this is the recorded path's translation applied a chunk at a time.
+    """
+    if language == "en" or not language or not text.strip():
+        return text, "source", ""
+    if not llm.available:
+        return "", "unavailable", "no translation provider configured"
+
+    res = llm.complete(
+        LIVE_PROMPT.format(
+            language_name=settings.language_name(language),
+            language_code=language,
+            text=text.strip(),
+        ),
+        system=TRANSLATE_SYSTEM,
+        temperature=0.2,
+        max_tokens=700,
+        timeout=45.0,
+        retries=0,      # a live chunk is worth one attempt; the next one is seconds away
+        fast=True,
+    )
+    if not res.ok:
+        return "", res.engine, res.error
+    return res.text.strip(), res.engine, ""
+
+
 def translate_knowledge(knowledge: dict, language: str) -> tuple[dict, str, str]:
     """Return (translated_knowledge, engine, error). English is a no-op."""
     if language == "en" or not language:

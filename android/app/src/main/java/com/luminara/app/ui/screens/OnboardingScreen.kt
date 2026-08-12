@@ -33,6 +33,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -66,9 +68,13 @@ import com.luminara.app.ui.theme.VioletSoft
 @Composable
 fun OnboardingScreen(
     initialLanguage: String,
-    onContinue: (String) -> Unit,
+    initialName: String = "",
+    initialRole: String = "student",
+    onContinue: (name: String, role: String, language: String) -> Unit,
 ) {
     var selected by remember { mutableStateOf(initialLanguage) }
+    var name by remember { mutableStateOf(initialName) }
+    var role by remember { mutableStateOf(initialRole) }
 
     LuminaraBackground {
         LazyColumn(
@@ -95,7 +101,65 @@ fun OnboardingScreen(
             }
 
             item {
-                Spacer(Modifier.height(36.dp))
+                Spacer(Modifier.height(30.dp))
+                Text(
+                    "HOW WILL YOU USE LUMINARA?",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextFaint,
+                    letterSpacing = 1.6.sp,
+                )
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    RoleTile(
+                        title = "Student",
+                        blurb = "Follow classes, revise, ask BOB",
+                        selected = role == "student",
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                    ) { role = "student" }
+                    RoleTile(
+                        title = "Teacher",
+                        blurb = "Create classes, upload lectures",
+                        selected = role == "teacher",
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                    ) { role = "teacher" }
+                }
+            }
+
+            item {
+                Spacer(Modifier.height(24.dp))
+                Text(
+                    "YOUR NAME",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextFaint,
+                    letterSpacing = 1.6.sp,
+                )
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    singleLine = true,
+                    placeholder = {
+                        Text(
+                            if (role == "teacher") "Dr Rao" else "Aisha",
+                            color = TextFaint,
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Violet,
+                        unfocusedBorderColor = InkBorder,
+                        focusedContainerColor = InkCard.copy(alpha = 0.6f),
+                        unfocusedContainerColor = InkCard.copy(alpha = 0.6f),
+                    ),
+                )
+            }
+
+            item {
+                Spacer(Modifier.height(24.dp))
                 Text(
                     "I LEARN BEST IN",
                     style = MaterialTheme.typography.labelSmall,
@@ -148,7 +212,7 @@ fun OnboardingScreen(
             item {
                 Spacer(Modifier.height(28.dp))
                 Button(
-                    onClick = { onContinue(selected) },
+                    onClick = { onContinue(name, role, selected) },
                     modifier = Modifier.fillMaxWidth().height(56.dp),
                     shape = RoundedCornerShape(16.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Violet),
@@ -210,6 +274,56 @@ private fun Wordmark() {
             style = MaterialTheme.typography.headlineSmall,
             color = MaterialTheme.colorScheme.onBackground,
             fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+@Composable
+private fun RoleTile(
+    title: String,
+    blurb: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val shape = RoundedCornerShape(18.dp)
+    Column(
+        modifier
+            .background(
+                if (selected) Violet.copy(alpha = 0.18f) else InkCard.copy(alpha = 0.7f),
+                shape,
+            )
+            .border(1.dp, if (selected) Violet else InkBorder, shape)
+            .clickable { onClick() }
+            .padding(16.dp)
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                title,
+                style = MaterialTheme.typography.titleMedium,
+                color = if (selected) VioletSoft else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+            )
+            if (selected) {
+                Box(
+                    Modifier.size(20.dp).background(Violet, CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.Check,
+                        null,
+                        tint = Color.White,
+                        modifier = Modifier.size(13.dp),
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            blurb,
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextSecondary,
+            fontSize = 12.5.sp,
         )
     }
 }

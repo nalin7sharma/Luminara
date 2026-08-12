@@ -27,10 +27,33 @@ class Prefs(context: Context) {
             ?: LuminaraApi.DEFAULT_BASE_URL
         set(value) = sp.edit().putString(KEY_BASE_URL, value).apply()
 
+    /** How the student described themselves at onboarding, before any account. */
+    var role: String
+        get() = sp.getString(KEY_ROLE, "student") ?: "student"
+        set(value) = sp.edit().putString(KEY_ROLE, value).apply()
+
+    var name: String
+        get() = sp.getString(KEY_NAME, "") ?: ""
+        set(value) = sp.edit().putString(KEY_NAME, value).apply()
+
+    /** Bearer token. Cleared on sign out; absent means guest, which is allowed. */
+    var token: String?
+        get() = sp.getString(KEY_TOKEN, null)
+        set(value) = sp.edit().apply {
+            if (value == null) remove(KEY_TOKEN) else putString(KEY_TOKEN, value)
+        }.apply()
+
+    fun clearAccount() {
+        sp.edit().remove(KEY_TOKEN).apply()
+    }
+
     companion object {
         private const val KEY_LANGUAGE = "language"
         private const val KEY_ONBOARDED = "onboarded"
         private const val KEY_BASE_URL = "base_url"
+        private const val KEY_ROLE = "role"
+        private const val KEY_NAME = "name"
+        private const val KEY_TOKEN = "auth_token"
         const val DEFAULT_LANGUAGE = "en"
     }
 }

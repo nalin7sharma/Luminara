@@ -61,6 +61,11 @@ came from the whiteboard and not from the professor's words, that is structurall
 | Simple explanation | "Simple Explanation" section + BOB's `explain_simple` intent |
 | Lecture Q&A | Ask BOB, with source chips (`Speech · 00:40`, `Whiteboard`) |
 | BOB integration | Every reasoning stage runs on the IBM Bob inference gateway |
+| Lecture library | My Lectures — thumbnail, status, language, duration, formulas, date |
+| Lecture script | Timestamped account of the class, searchable, linked to board moments |
+| Downloadable study pack | A4 PDF with notes, script, formulas and the board image |
+| In-lecture search | "where was the formula written" → the exact evidence, with its source |
+| Live Lecture | Near-real-time bilingual transcript during class, ~12s behind, then saved as a normal lecture |
 
 ## 4. BOB integration
 
@@ -91,7 +96,11 @@ determined from the shipped IBM Bob client.
 
 **Android app** (`android/`) — Kotlin, Jetpack Compose (Material 3), MVVM with a single
 `LuminaraViewModel`, OkHttp + kotlinx.serialization, Coil, Navigation-Compose.
-Screens: Home → Lecture Setup → Processing → Dashboard → Visual Understanding → Ask BOB.
+Flow: Welcome (language) → Home → Lecture Setup → Processing → **Lecture Detail**.
+
+Lecture Detail is one screen with seven tabs — Overview, Script, Notes, Visuals, Formulas,
+Ask BOB, Sources — and every source chip in it is navigation: tap a `Speech · 00:59` chip on a note
+or a BOB answer and you land on that moment of the script.
 
 **Backend** (`backend/`) — one FastAPI service, SQLite via SQLAlchemy.
 
@@ -105,8 +114,12 @@ app/
     vision.py             board OCR + diagram interpretation (+ OpenCV geometry pass)
     understanding.py      multimodal fusion → LectureKnowledge
     notes.py              deterministic projection into note sections
+    script.py             timestamped lecture script (reuses the stored transcript)
+    search.py             lexical search over speech/board/formulas/notes
     translate.py          formula-safe translation
     runner.py             staged orchestration, real timings
+  export/
+    studypack.py          print-designed HTML → PDF via the local headless browser
   agents/
     bob.py                the lecture-grounded agent
     bob_client.py         pluggable BOB transport (openai/anthropic/gemini/custom)
@@ -168,11 +181,49 @@ lecture's narration is Windows SAPI text-to-speech, and the whiteboard is a rend
 (`backend/scripts/make_demo_assets.py`). They are inputs to the pipeline, exactly as a real
 recording and a real photograph would be.
 
+## 9b. Live Lecture
+
+Live mode records the class on the phone and posts 9-second chunks to the same local Whisper and the
+same translation path the recorded pipeline uses. Pressing **End lecture** hands the accumulated
+transcript to the identical reasoning step, so a live lecture becomes an ordinary lecture — notes,
+script, BOB and study pack included.
+
+It is **near real time, not real time**. A 9-second chunk cannot be transcribed before it has been
+spoken, so the student is always at least one chunk behind, plus processing. Measured on the build
+machine: **10.3–13.4 s, mean 12.3 s**, and the app shows that number while recording rather than
+implying instant translation.
+
+Live sessions have no classroom image, so the Visuals and Formulas tabs are honestly empty for them.
+If nothing audible was captured, Luminara refuses to create a lecture at all.
+
+## 9c. Classroom: teachers, students and classes
+
+A thin layer over the same lecture system. A teacher creates a class and gets a six-character join
+code; students enter the code and the class appears on their home screen. The teacher uploads a
+lecture **into the existing pipeline** — same upload route, same processing, same LectureKnowledge —
+reviews the result, and presses Publish. Only then do students see it, and it opens in the same
+Lecture Detail everything else uses.
+
+* Accounts are email + password, hashed with PBKDF2-SHA256 and a per-user salt, with a signed,
+  expiring bearer token. The signing secret comes from `AUTH_SECRET` or is generated into
+  `backend/data/` on first run — never the repository.
+* **Signing in is optional.** The demo lecture, your own uploads and your own live sessions work as
+  a guest, exactly as before. An account is needed only to join or teach a class.
+* A lecture with no class is a personal lecture and behaves as it always did.
+
+**Video uploads** are supported at the door rather than in the pipeline: `pipeline/media.py`
+extracts the audio track to the same 16 kHz mono WAV Whisper already consumes, using the ffmpeg
+bundled with `imageio-ffmpeg` (nothing to install). If the teacher does not attach a board photo,
+three frames are sampled across the recording and the most board-like is used — a heuristic, and
+labelled as a frame rather than a photograph.
+
 ## 10. Limitations
 
-* In-app audio recording and image capture are not implemented; the backend upload endpoint
-  (`POST /api/lectures/upload`) is live and accepts audio + image, but the app drives the demo lecture.
-* Audio must be PCM WAV — `ffmpeg` is not a dependency, so MP3/M4A/MP4 are rejected with a clear message.
+* Teachers upload from the app; students record live. In-app camera capture of a board photo is not
+  implemented.
+* Video and compressed audio are converted at upload using the bundled ffmpeg. If that binary is
+  ever unavailable, uploads other than 16 kHz mono WAV are rejected with a clear message rather
+  than failing later in transcription.
 * Whisper runs on CPU here (no CUDA on the build machine), so speech recognition takes a few seconds.
 * A full processing run takes ~105 s; the app also offers an instant path to the last processed result.
 * English and Hindi are verified end to end. Bangla and Arabic are wired through the same code path

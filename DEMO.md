@@ -76,6 +76,25 @@ Show the whiteboard image, then the verbatim OCR text, then the diagram reading:
 > "Speech recognition can't produce that. A vision model read the drawing — and it was never shown
 > the transcript, so this is independent evidence, not a guess from context."
 
+### 5b. The script — what happened, minute by minute
+Open the **Script** tab.
+
+> "This isn't a second transcription — it's the same transcript the pipeline already produced,
+> arranged as a readable account of the class. And notice the amber markers: those are the moments
+> where something went on the board. At 00:59 the professor says 'I've written the recurrence
+> relation on the board' — and the script knows what that was."
+
+Tap a moment to expand its linked concepts and board events. Type in the search box to jump around.
+
+### 5c. Download the study pack
+Overview tab → **Download study pack**.
+
+> "A4 PDF, generated locally in about two seconds — summary, concepts with their sources, formulas,
+> the board image and its OCR, the technical terms, and the whole script. In Hindi when the student
+> is studying in Hindi, with the mathematics untouched."
+
+It lands in Downloads; tap **Open**.
+
 ### 6. Ask BOB — three questions
 
 **a. "Explain the diagram in simple Hindi."**
@@ -88,6 +107,33 @@ Point at the citation: *"BOB knows it came from the board, not from her voice."*
 
 **c. "Give me three quiz questions from this lecture."**
 Numbered questions with answers, each grounded in the lecture.
+
+### 6b. Follow the evidence
+Tap the `Speech · 00:59` chip under BOB's answer.
+
+> "Every citation is a link. It just took us to that exact moment of the lecture."
+
+Then open the **Sources** tab and search *formula*.
+
+> "Five matches, every one from this lecture, each labelled with where it came from. This is search
+> over the class, not over the internet."
+
+### 6c. Live Lecture (optional, ~40s)
+Home → **Live Lecture**. Grant the microphone, then speak — or hold the phone to a laptop playing
+a recording.
+
+> "Same pipeline, running while the class happens. Nine-second chunks go to the same local Whisper
+> and the same translator. Look at the top: **~12 seconds behind**. That's measured, not a promise —
+> a nine-second chunk cannot be transcribed until it has been spoken. This is near real time, and
+> we say so."
+
+Press **End lecture**:
+
+> "And now it's just… a lecture. Same notes, same script, same BOB. It's in My Lectures next to the
+> recorded ones."
+
+**If the room is quiet or the mic is blocked**, show that too — it says *"Nothing to save — no
+speech was recognised"* rather than inventing a lecture.
 
 ### 7. Close
 
@@ -122,6 +168,12 @@ entirely, the Home screen shows "Backend unreachable" with a Retry button.
 It is the reasoning engine for the whole pipeline — board OCR, diagram interpretation, multimodal
 fusion, translation and the agent. `/health` names the provider chain; every stage and every chat
 message carries its engine badge.
+
+**"Is Live Lecture real time?"**
+No, and we do not claim it is. Audio is processed in 9-second chunks, so the student is always at
+least one chunk behind, plus transcription and translation. Measured on this machine: **10.3–13.4 s,
+mean 12.3 s**, and the app displays that figure while recording. `/api/live/config` returns
+`realtime: false`.
 
 **"Can it take a real lecture?"**
 `POST /api/lectures/upload` accepts audio and a board photo and runs the identical pipeline. Audio

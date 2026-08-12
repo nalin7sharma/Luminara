@@ -29,7 +29,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
@@ -50,11 +52,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 import com.luminara.app.data.LANGUAGE_OPTIONS
 import com.luminara.app.data.LectureSummaryDto
 import com.luminara.app.data.LuminaraApi
@@ -63,6 +73,7 @@ import com.luminara.app.ui.components.ErrorBanner
 import com.luminara.app.ui.components.LuminaraBackground
 import com.luminara.app.ui.components.SectionLabel
 import com.luminara.app.ui.theme.Amber
+import com.luminara.app.ui.theme.Ink
 import com.luminara.app.ui.theme.InkBorder
 import com.luminara.app.ui.theme.InkCard
 import com.luminara.app.ui.theme.Rose
@@ -80,13 +91,20 @@ fun HomeScreen(
     onStartLecture: () -> Unit,
     onOpenLecture: (String) -> Unit,
     onAskBob: (String) -> Unit,
+    onLiveLecture: () -> Unit,
     onLanguage: (String) -> Unit,
     onRefresh: () -> Unit,
     onBaseUrlChange: (String) -> Unit,
+    onClasses: () -> Unit,
+    onOpenClass: (String) -> Unit,
+    onUploadLecture: () -> Unit,
+    onSignIn: () -> Unit,
+    onSignOut: () -> Unit,
 ) {
     var showSettings by remember { mutableStateOf(false) }
     var showLanguages by remember { mutableStateOf(false) }
     val lectures = state.readyLectures
+    val teacher = state.isTeacher
 
     LuminaraBackground {
         LazyColumn(
@@ -100,11 +118,40 @@ fun HomeScreen(
                 item { ErrorBanner("Backend unreachable — $message", onRetry = onRefresh) }
             }
 
+            if (teacher) {
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        ActionTile(
+                            icon = Icons.Filled.Groups,
+                            title = "Create class",
+                            tint = Teal,
+                            modifier = Modifier.weight(1f),
+                            enabled = state.signedIn,
+                            onClick = onClasses,
+                        )
+                        ActionTile(
+                            icon = Icons.Filled.CloudUpload,
+                            title = "Upload lecture",
+                            tint = Amber,
+                            modifier = Modifier.weight(1f),
+                            enabled = state.signedIn,
+                            onClick = onUploadLecture,
+                        )
+                    }
+                }
+            }
+
+            item { ClassesSection(state, onClasses, onOpenClass, onSignIn) }
+
             item { DemoHeroCard(onStartLecture) }
 
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    LiveLectureTile(Modifier.weight(1f))
+                    LiveLectureTile(
+                        enabled = state.connectionError == null,
+                        modifier = Modifier.weight(1f),
+                        onClick = onLiveLecture,
+                    )
                     AskBobTile(
                         enabled = lectures.isNotEmpty(),
                         lectureCount = lectures.size,
@@ -133,6 +180,19 @@ fun HomeScreen(
                 items(lectures) { lecture ->
                     LectureCard(lecture) { onOpenLecture(lecture.id) }
                 }
+            }
+
+            item {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    if (state.signedIn) "Sign out" else "Sign in or create an account",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextFaint,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { if (state.signedIn) onSignOut() else onSignIn() }
+                        .padding(12.dp),
+                )
             }
         }
     }
@@ -176,7 +236,11 @@ private fun Greeting(state: UiState, onLanguage: () -> Unit, onSettings: () -> U
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    greeting,
+                    if (state.displayName.isNotBlank()) {
+                        "$greeting, ${state.displayName}"
+                    } else {
+                        greeting
+                    },
                     style = MaterialTheme.typography.bodyLarge,
                     color = TextSecondary,
                 )
@@ -195,6 +259,17 @@ private fun Greeting(state: UiState, onLanguage: () -> Unit, onSettings: () -> U
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             LanguageChip(option.nativeName, onLanguage)
             StatusChip(state)
+            if (state.signedIn) {
+                Text(
+                    if (state.isTeacher) "Teacher" else "Student",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Teal,
+                    modifier = Modifier
+                        .background(Teal.copy(alpha = 0.10f), RoundedCornerShape(50))
+                        .border(1.dp, Teal.copy(alpha = 0.26f), RoundedCornerShape(50))
+                        .padding(horizontal = 11.dp, vertical = 7.dp),
+                )
+            }
         }
     }
 }
@@ -234,6 +309,160 @@ private fun StatusChip(state: UiState) {
         Box(Modifier.size(6.dp).background(color, CircleShape))
         Spacer(Modifier.width(7.dp))
         Text(label, style = MaterialTheme.typography.labelSmall, color = color)
+    }
+}
+
+@Composable
+private fun ActionTile(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    tint: Color,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val shape = RoundedCornerShape(18.dp)
+    Row(
+        modifier
+            .height(62.dp)
+            .background(
+                if (enabled) tint.copy(alpha = 0.12f) else InkCard.copy(alpha = 0.45f),
+                shape,
+            )
+            .border(1.dp, if (enabled) tint.copy(alpha = 0.3f) else InkBorder, shape)
+            .clickable(enabled = enabled) { onClick() }
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            icon,
+            null,
+            tint = if (enabled) tint else TextFaint,
+            modifier = Modifier.size(19.dp),
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            title,
+            style = MaterialTheme.typography.titleSmall,
+            color = if (enabled) MaterialTheme.colorScheme.onSurface else TextFaint,
+            fontSize = 13.5.sp,
+        )
+    }
+}
+
+@Composable
+private fun ClassesSection(
+    state: UiState,
+    onSeeAll: () -> Unit,
+    onOpenClass: (String) -> Unit,
+    onSignIn: () -> Unit,
+) {
+    if (!state.signedIn) {
+        val shape = RoundedCornerShape(20.dp)
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .background(InkCard.copy(alpha = 0.5f), shape)
+                .border(1.dp, InkBorder, shape)
+                .clickable { onSignIn() }
+                .padding(17.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Groups, null, tint = Violet, modifier = Modifier.size(19.dp))
+                Spacer(Modifier.width(11.dp))
+                Text(
+                    "My classes",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+            Spacer(Modifier.height(7.dp))
+            Text(
+                if (state.isTeacher) {
+                    "Sign in to create a class and share lectures with your students."
+                } else {
+                    "Sign in to join your teacher's class with a code."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextFaint,
+                fontSize = 12.5.sp,
+            )
+        }
+        return
+    }
+
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SectionLabel("My classes", Modifier.weight(1f))
+            Text(
+                if (state.classes.isEmpty()) {
+                    if (state.isTeacher) "Create" else "Join"
+                } else "See all",
+                style = MaterialTheme.typography.labelSmall,
+                color = Violet,
+                modifier = Modifier.clickable { onSeeAll() },
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+
+        if (state.classes.isEmpty()) {
+            Text(
+                if (state.isTeacher) {
+                    "No classes yet — create one to start sharing lectures."
+                } else {
+                    "You have not joined a class yet."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextFaint,
+                fontSize = 12.5.sp,
+            )
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                state.classes.take(3).forEach { schoolClass ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(InkCard.copy(alpha = 0.62f), RoundedCornerShape(16.dp))
+                            .border(1.dp, InkBorder, RoundedCornerShape(16.dp))
+                            .clickable { onOpenClass(schoolClass.id) }
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                schoolClass.name,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                buildString {
+                                    append(
+                                        if (schoolClass.isTeacher) {
+                                            "${schoolClass.studentCount} student" +
+                                                (if (schoolClass.studentCount != 1) "s" else "")
+                                        } else {
+                                            schoolClass.teacherName.ifBlank { "Class" }
+                                        }
+                                    )
+                                    append(" · ${schoolClass.lectureCount} lecture")
+                                    if (schoolClass.lectureCount != 1) append("s")
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextFaint,
+                                fontSize = 12.sp,
+                            )
+                        }
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowForward,
+                            null,
+                            tint = TextFaint,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -310,7 +539,11 @@ private fun Fact(value: String, label: String) {
 }
 
 @Composable
-private fun LiveLectureTile(modifier: Modifier = Modifier) {
+private fun LiveLectureTile(
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
     val transition = rememberInfiniteTransition(label = "pulse")
     val pulse by transition.animateFloat(
         initialValue = 0.35f,
@@ -322,17 +555,26 @@ private fun LiveLectureTile(modifier: Modifier = Modifier) {
     Column(
         modifier
             .height(146.dp)
-            .background(InkCard.copy(alpha = 0.5f), shape)
-            .border(1.dp, InkBorder, shape)
+            .background(
+                if (enabled) Rose.copy(alpha = 0.12f) else InkCard.copy(alpha = 0.5f),
+                shape,
+            )
+            .border(1.dp, if (enabled) Rose.copy(alpha = 0.32f) else InkBorder, shape)
+            .clickable(enabled = enabled) { onClick() }
             .padding(16.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(8.dp).alpha(pulse).background(Rose, CircleShape))
+            Box(
+                Modifier
+                    .size(8.dp)
+                    .alpha(if (enabled) pulse else 0.4f)
+                    .background(Rose, CircleShape)
+            )
             Spacer(Modifier.width(8.dp))
             Icon(
                 Icons.Filled.GraphicEq,
                 null,
-                tint = TextFaint,
+                tint = if (enabled) Rose else TextFaint,
                 modifier = Modifier.size(16.dp),
             )
         }
@@ -340,22 +582,19 @@ private fun LiveLectureTile(modifier: Modifier = Modifier) {
         Text(
             "Live Lecture",
             style = MaterialTheme.typography.titleMedium,
-            color = TextSecondary,
+            color = if (enabled) MaterialTheme.colorScheme.onSurface else TextSecondary,
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            "Follow class in near real time",
+            if (enabled) {
+                "Follow class in near real time"
+            } else {
+                "Needs the backend"
+            },
             style = MaterialTheme.typography.bodyMedium,
             color = TextFaint,
             fontSize = 12.5.sp,
-        )
-        Spacer(Modifier.height(9.dp))
-        Text(
-            "COMING NEXT",
-            style = MaterialTheme.typography.labelSmall,
-            color = Amber,
-            fontSize = 10.sp,
-            letterSpacing = 1.2.sp,
+            maxLines = 2,
         )
     }
 }
@@ -434,12 +673,38 @@ private fun EmptyLibrary() {
     }
 }
 
-@Composable
-private fun LectureCard(lecture: LectureSummaryDto, onClick: () -> Unit) {
+/** Status of a lecture, as a colour plus a word — never a colour alone. */
+private fun lectureStatus(lecture: LectureSummaryDto): Pair<String, androidx.compose.ui.graphics.Color> {
     val live = lecture.engine.isNotBlank() &&
         !lecture.engine.startsWith("local") && !lecture.engine.startsWith("none")
-    val dot = if (live) Teal else Amber
+    return when {
+        lecture.status == "failed" -> "Failed" to Rose
+        lecture.status == "processing" -> "Processing" to Violet
+        lecture.status != "ready" -> "Not processed" to TextFaint
+        live -> "Ready" to Teal
+        else -> "Ready · local engine" to Amber
+    }
+}
+
+/** "12 Aug" from an ISO timestamp, with or without an offset. */
+private fun shortDate(iso: String?): String {
+    if (iso.isNullOrBlank()) return ""
+    return runCatching {
+        val instant = runCatching { Instant.parse(iso) }.getOrElse {
+            LocalDateTime.parse(iso.substringBefore('+').substringBefore('Z'))
+                .toInstant(ZoneOffset.UTC)
+        }
+        DateTimeFormatter.ofPattern("d MMM")
+            .withZone(ZoneId.systemDefault())
+            .format(instant)
+    }.getOrDefault("")
+}
+
+@Composable
+private fun LectureCard(lecture: LectureSummaryDto, onClick: () -> Unit) {
+    val (statusLabel, statusColor) = lectureStatus(lecture)
     val shape = RoundedCornerShape(20.dp)
+    val date = shortDate(lecture.processedAt ?: lecture.createdAt)
 
     Row(
         Modifier
@@ -447,34 +712,83 @@ private fun LectureCard(lecture: LectureSummaryDto, onClick: () -> Unit) {
             .background(InkCard.copy(alpha = 0.68f), shape)
             .border(1.dp, InkBorder, shape)
             .clickable { onClick() }
-            .padding(17.dp),
+            .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            Modifier.size(9.dp).background(dot, CircleShape),
-        )
+        // Board thumbnail, when this lecture had a classroom image
+        val thumb = LuminaraApi.mediaUrl(lecture.imageUrl)
+        if (thumb != null) {
+            AsyncImage(
+                model = thumb,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(58.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .border(1.dp, InkBorder, RoundedCornerShape(12.dp)),
+            )
+        } else {
+            Box(
+                Modifier
+                    .size(58.dp)
+                    .background(Ink, RoundedCornerShape(12.dp))
+                    .border(1.dp, InkBorder, RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.GraphicEq,
+                    null,
+                    tint = TextFaint,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+
         Spacer(Modifier.width(13.dp))
+
         Column(Modifier.weight(1f)) {
             Text(
                 lecture.title,
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 15.5.sp,
                 maxLines = 2,
             )
-            Spacer(Modifier.height(5.dp))
+            if (lecture.topic.isNotBlank() && !lecture.title.contains(lecture.topic, true)) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    lecture.topic,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextSecondary,
+                    fontSize = 12.5.sp,
+                    maxLines = 1,
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(6.dp).background(statusColor, CircleShape))
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    statusLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = statusColor,
+                )
+            }
+            Spacer(Modifier.height(4.dp))
             Text(
                 buildString {
                     append(languageOption(lecture.language).nativeName)
-                    if (lecture.conceptCount > 0) append(" · ${lecture.conceptCount} concepts")
-                    if (lecture.formulaCount > 0) append(" · ${lecture.formulaCount} formulas")
                     if (lecture.durationSec > 0) append(" · ${lecture.durationSec.toInt()}s")
+                    if (lecture.formulaCount > 0) append(" · ${lecture.formulaCount} formulas")
+                    if (date.isNotBlank()) append(" · $date")
                 },
                 style = MaterialTheme.typography.bodyMedium,
-                color = TextSecondary,
-                fontSize = 12.5.sp,
+                color = TextFaint,
+                fontSize = 12.sp,
             )
         }
-        Spacer(Modifier.width(10.dp))
+
+        Spacer(Modifier.width(8.dp))
         Icon(
             Icons.AutoMirrored.Filled.ArrowForward,
             null,

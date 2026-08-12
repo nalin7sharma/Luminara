@@ -282,119 +282,215 @@ def _run(lecture_id: str) -> None:
             db.commit()
             return
 
-        # ---- 5: fusion ----------------------------------------------------
-        start_stage(db, lecture_id, "lecture_understood")
-        knowledge, engine, err = understanding.fuse(transcript, vres)
-        knowledge["lecture_id"] = lecture_id
-        knowledge["language"] = "en"
-        knowledge["engines"]["reasoning"] = engine
-        end_stage(
-            db,
-            lecture_id,
-            "lecture_understood",
-            status="done",
-            detail=(
-                f"{len(knowledge.get('key_concepts', []))} concepts, "
-                f"{len(knowledge.get('formulas', []))} formulas, "
-                f"{len(knowledge.get('modality_links', []))} cross-modal links"
-                + (f" · degraded: {err[:80]}" if err else "")
-            ),
+        _reason_and_publish(db, lec, transcript, vres)
+
+
+def _reason_and_publish(db, lec: Lecture, transcript, vres) -> None:
+    """Fusion → notes → translation → BOB.
+
+    Shared by the recorded pipeline and the live finalise step so the two can
+    never drift: a live lecture ends up with exactly the same LectureKnowledge,
+    notes and BOB grounding as an uploaded one.
+    """
+    lecture_id = lec.id
+    language = lec.language or "en"
+
+    # ---- 5: fusion --------------------------------------------------------
+    start_stage(db, lecture_id, "lecture_understood")
+    knowledge, engine, err = understanding.fuse(transcript, vres)
+    knowledge["lecture_id"] = lecture_id
+    knowledge["language"] = "en"
+    knowledge["engines"]["reasoning"] = engine
+    end_stage(
+        db,
+        lecture_id,
+        "lecture_understood",
+        status="done",
+        detail=(
+            f"{len(knowledge.get('key_concepts', []))} concepts, "
+            f"{len(knowledge.get('formulas', []))} formulas, "
+            f"{len(knowledge.get('modality_links', []))} cross-modal links"
+            + (f" · degraded: {err[:80]}" if err else "")
+        ),
+        engine=engine,
+    )
+
+    lec.title = knowledge.get("title") or lec.title
+    lec.engine = engine
+    lec.knowledge_json = _dumps(knowledge)
+    db.commit()
+
+    # ---- 6: notes ---------------------------------------------------------
+    start_stage(db, lecture_id, "material_generated")
+    en_notes = notes_mod.build_notes(knowledge, "en")
+    db.add(
+        Note(
+            lecture_id=lecture_id,
+            language="en",
             engine=engine,
+            payload_json=_dumps({"knowledge": knowledge, "notes": en_notes}),
         )
+    )
+    db.commit()
+    end_stage(
+        db,
+        lecture_id,
+        "material_generated",
+        detail=f"{len(en_notes['sections'])} note sections built from the lecture knowledge",
+        engine="luminara-notes",
+    )
 
-        lec.title = knowledge.get("title") or lec.title
-        lec.engine = engine
-        lec.knowledge_json = _dumps(knowledge)
-        db.commit()
-
-        # ---- 6: notes -----------------------------------------------------
-        start_stage(db, lecture_id, "material_generated")
-        en_notes = notes_mod.build_notes(knowledge, "en")
-        db.add(
-            Note(
-                lecture_id=lecture_id,
-                language="en",
-                engine=engine,
-                payload_json=_dumps({"knowledge": knowledge, "notes": en_notes}),
-            )
-        )
-        db.commit()
+    # ---- 7: translation ---------------------------------------------------
+    start_stage(db, lecture_id, "translated")
+    if language == "en":
         end_stage(
             db,
             lecture_id,
-            "material_generated",
-            detail=f"{len(en_notes['sections'])} note sections built from the lecture knowledge",
-            engine="luminara-notes",
+            "translated",
+            status="skipped",
+            detail="student is studying in English",
         )
-
-        # ---- 7: translation ----------------------------------------------
-        start_stage(db, lecture_id, "translated")
-        if language == "en":
+    else:
+        translated, t_engine, t_err = translate_mod.translate_knowledge(knowledge, language)
+        if t_err:
             end_stage(
                 db,
                 lecture_id,
                 "translated",
-                status="skipped",
-                detail="student is studying in English",
+                status="failed",
+                detail=t_err[:160],
+                engine=t_engine,
             )
         else:
-            translated, t_engine, t_err = translate_mod.translate_knowledge(knowledge, language)
-            if t_err:
-                end_stage(
-                    db,
-                    lecture_id,
-                    "translated",
-                    status="failed",
-                    detail=t_err[:160],
+            t_notes = notes_mod.build_notes(translated, language)
+            db.add(
+                Note(
+                    lecture_id=lecture_id,
+                    language=language,
                     engine=t_engine,
+                    payload_json=_dumps({"knowledge": translated, "notes": t_notes}),
                 )
-            else:
-                t_notes = notes_mod.build_notes(translated, language)
-                db.add(
-                    Note(
-                        lecture_id=lecture_id,
-                        language=language,
-                        engine=t_engine,
-                        payload_json=_dumps({"knowledge": translated, "notes": t_notes}),
-                    )
-                )
-                db.commit()
-                end_stage(
-                    db,
-                    lecture_id,
-                    "translated",
-                    detail=f"{settings.language_name(language)} study material ready, "
-                    f"{len(knowledge.get('formulas', []))} formulas preserved unchanged",
-                    engine=t_engine,
-                )
-
-        # ---- 8: BOB -------------------------------------------------------
-        start_stage(db, lecture_id, "bob_ready")
-        from ..agents.bob import compile_context
-
-        ctx = compile_context(knowledge)
-        if bob_client.configured:
-            bob_engine, bob_detail = (
-                f"bob:{settings.bob_protocol}",
-                f"BOB endpoint connected · {len(ctx)} characters of lecture evidence loaded",
             )
-        elif llm.available:
-            bob_engine, bob_detail = (
-                "gemini-fallback",
-                f"BOB agent running on the local reasoning model · {len(ctx)} characters "
-                "of lecture evidence loaded",
+            db.commit()
+            end_stage(
+                db,
+                lecture_id,
+                "translated",
+                detail=f"{settings.language_name(language)} study material ready, "
+                f"{len(knowledge.get('formulas', []))} formulas preserved unchanged",
+                engine=t_engine,
             )
-        else:
-            bob_engine, bob_detail = (
-                "offline-lecture-store",
-                "No agent endpoint configured — BOB will answer from stored notes only",
-            )
-        end_stage(db, lecture_id, "bob_ready", detail=bob_detail, engine=bob_engine)
 
-        lec.status = "ready"
-        lec.processed_at = _now()
+    # ---- 8: BOB -----------------------------------------------------------
+    start_stage(db, lecture_id, "bob_ready")
+    from ..agents.bob import compile_context
+
+    ctx = compile_context(knowledge)
+    if bob_client.configured:
+        bob_engine, bob_detail = (
+            f"bob:{settings.bob_protocol}",
+            f"BOB endpoint connected · {len(ctx)} characters of lecture evidence loaded",
+        )
+    elif llm.available:
+        bob_engine, bob_detail = (
+            "gemini-fallback",
+            f"BOB agent running on the local reasoning model · {len(ctx)} characters "
+            "of lecture evidence loaded",
+        )
+    else:
+        bob_engine, bob_detail = (
+            "offline-lecture-store",
+            "No agent endpoint configured — BOB will answer from stored notes only",
+        )
+    end_stage(db, lecture_id, "bob_ready", detail=bob_detail, engine=bob_engine)
+
+    lec.status = "ready"
+    lec.processed_at = _now()
+    db.commit()
+    log.info("lecture %s ready (%s)", lecture_id, lec.title)
+
+
+def finalize_live(lecture_id: str) -> None:
+    """Turn a finished live session into a normal lecture.
+
+    The audio was already transcribed chunk by chunk while the class was
+    happening, so this picks up at fusion and runs the identical reasoning the
+    recorded path runs — same LectureKnowledge, same notes, same BOB grounding.
+    """
+    with session_scope() as db:
+        lec = db.get(Lecture, lecture_id)
+        if lec is None:
+            log.warning("no such live lecture: %s", lecture_id)
+            return
+
+        segments = sorted(lec.segments, key=lambda s: s.start)
+        lec.status = "processing"
+        reset_stages(db, lecture_id)
         db.commit()
-        log.info("lecture %s ready (%s)", lecture_id, lec.title)
+
+        # Speech recognition already happened, live. Record it as done rather
+        # than pretending it is about to happen.
+        end_stage(
+            db,
+            lecture_id,
+            "audio_decoded",
+            detail=f"{lec.duration_sec:.1f}s captured live in {lec.chunk_count} chunks",
+            engine="pcm-wav",
+        )
+        if segments:
+            end_stage(
+                db,
+                lecture_id,
+                "speech_recognized",
+                detail=f"{len(segments)} segments recognised during the lecture, "
+                f"{sum(len(s.text.split()) for s in segments)} words",
+                engine=f"whisper:{settings.whisper_model}",
+            )
+        else:
+            end_stage(
+                db,
+                lecture_id,
+                "speech_recognized",
+                status="failed",
+                detail="no speech was recognised in this session",
+            )
+
+        for key in ("board_text_extracted", "visuals_analyzed"):
+            end_stage(
+                db,
+                lecture_id,
+                key,
+                status="skipped",
+                detail="no classroom image was captured in this live session",
+            )
+
+        transcript = asr.Transcript(
+            segments=[asr.Segment(s.start, s.end, s.text) for s in segments],
+            language="en",
+            duration=lec.duration_sec,
+            engine=f"whisper:{settings.whisper_model}",
+            ok=bool(segments),
+            error="" if segments else "no speech recognised",
+        )
+        vres = vision.VisionResult(
+            ok=False, engine="none", error="live session had no classroom image"
+        )
+
+        if not segments:
+            lec.status = "failed"
+            lec.error = "no speech was recognised during this live lecture"
+            for key in ("lecture_understood", "material_generated", "translated", "bob_ready"):
+                end_stage(db, lecture_id, key, status="skipped", detail="nothing to reason over")
+            db.commit()
+            return
+
+        _reason_and_publish(db, lec, transcript, vres)
+
+
+def start_finalize(lecture_id: str) -> None:
+    threading.Thread(
+        target=finalize_live, args=(lecture_id,), name=f"live-finish-{lecture_id[:8]}", daemon=True
+    ).start()
 
 
 def _dumps(obj) -> str:

@@ -30,6 +30,8 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ImageSearch
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -119,9 +121,13 @@ fun LectureDetailScreen(
     onSearchQuery: (String) -> Unit,
     onClearSearch: () -> Unit,
     onReprocess: (String) -> Unit,
+    onPublish: (String, Boolean) -> Unit = { _, _ -> },
 ) {
     var tab by remember { mutableStateOf(initialTab) }
     var highlight by remember { mutableStateOf<String?>(null) }
+    // Hoisted so downloading a study pack does not throw the reader back to the
+    // top of the Overview — the confirmation appears where they tapped.
+    val overviewScroll = rememberLazyListState()
     val lecture = state.lecture
 
     fun openSource(source: SourceDto) {
@@ -162,7 +168,7 @@ fun LectureDetailScreen(
             when (tab) {
                 DetailTab.OVERVIEW -> OverviewTab(
                     state, overviewScroll, onLanguage, onDownload, onOpenPack, onSharePack,
-                    onDismissPack, onReprocess, onAskBob = { tab = DetailTab.BOB },
+                    onDismissPack, onReprocess, onPublish, onAskBob = { tab = DetailTab.BOB },
                 )
                 DetailTab.SCRIPT -> ScriptTab(state, highlight) { highlight = null }
                 DetailTab.NOTES -> NotesTab(state, ::openSource)
@@ -261,12 +267,14 @@ private fun TabStrip(selected: DetailTab, onSelect: (DetailTab) -> Unit) {
 @Composable
 private fun OverviewTab(
     state: UiState,
+    scrollState: androidx.compose.foundation.lazy.LazyListState,
     onLanguage: (String) -> Unit,
     onDownload: () -> Unit,
     onOpenPack: () -> Unit,
     onSharePack: () -> Unit,
     onDismissPack: () -> Unit,
     onReprocess: (String) -> Unit,
+    onPublish: (String, Boolean) -> Unit,
     onAskBob: () -> Unit,
 ) {
     val lecture = state.lecture ?: return
@@ -274,6 +282,7 @@ private fun OverviewTab(
 
     LazyColumn(
         Modifier.fillMaxSize(),
+        state = scrollState,
         contentPadding = PaddingValues(16.dp, 4.dp, 16.dp, 36.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
@@ -355,6 +364,11 @@ private fun OverviewTab(
             }
         }
 
+        // Only the teacher of this class sees it, and only for a class lecture.
+        if (!lecture.classId.isNullOrBlank() && state.isTeacher && state.signedIn) {
+            item { PublishCard(state, onPublish) }
+        }
+
         item { StudyPackCard(state, onDownload, onOpenPack, onSharePack, onDismissPack) }
 
         item {
@@ -394,6 +408,68 @@ private fun OverviewTab(
                     color = TextFaint,
                 )
             }
+        }
+    }
+}
+
+/** Review-then-publish, inside the same Lecture Detail the students will see. */
+@Composable
+private fun PublishCard(state: UiState, onPublish: (String, Boolean) -> Unit) {
+    val lecture = state.lecture ?: return
+    val ready = lecture.status == "ready"
+    val published = lecture.published
+
+    GlassCard(accent = if (published) Teal else Amber) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                if (published) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                null,
+                tint = if (published) Teal else Amber,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    if (published) "Published to the class" else "Draft",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    if (published) {
+                        "Students in ${lecture.className.ifBlank { "this class" }} can open it."
+                    } else {
+                        "Only you can see this. Review the notes, then publish."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextFaint,
+                    fontSize = 12.5.sp,
+                )
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        Button(
+            onClick = { onPublish(lecture.id, !published) },
+            enabled = ready,
+            modifier = Modifier.fillMaxWidth().height(46.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (published) InkCard else Teal
+            ),
+        ) {
+            Text(
+                if (published) "Unpublish" else "Publish to class",
+                color = if (published) TextSecondary else Ink,
+                style = MaterialTheme.typography.labelLarge,
+            )
+        }
+        if (!ready) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Wait for processing to finish before publishing.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextFaint,
+                fontSize = 12.sp,
+            )
         }
     }
 }
@@ -649,17 +725,47 @@ private fun ScriptLine(entry: ScriptEntryDto, expanded: Boolean, onClick: () -> 
                     color = MaterialTheme.colorScheme.onSurface,
                     fontSize = 15.sp,
                 )
-                if (entry.hasBoardMoment) {
-                    Spacer(Modifier.height(6.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                // Exactly one line per board event carries the marker, and it
+                // names the thing rather than saying "board activity".
+                entry.boardMoment?.let { moment ->
+                    Spacer(Modifier.height(7.dp))
+                    Row(
+                        Modifier
+                            .background(Amber.copy(alpha = 0.10f), RoundedCornerShape(9.dp))
+                            .border(1.dp, Amber.copy(alpha = 0.26f), RoundedCornerShape(9.dp))
+                            .padding(horizontal = 9.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         Box(Modifier.size(5.dp).background(Amber, CircleShape))
-                        Spacer(Modifier.width(7.dp))
+                        Spacer(Modifier.width(8.dp))
                         Text(
-                            "board activity at this moment",
+                            "On the board: ${moment.label}",
                             style = MaterialTheme.typography.labelSmall,
                             color = Amber,
+                            fontFamily = if (moment.kind == "formula") FontFamily.Monospace
+                            else null,
                         )
                     }
+                    if (moment.alsoAt.isNotEmpty()) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "also referenced at ${moment.alsoAt.joinToString(", ")}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextFaint,
+                            fontSize = 10.5.sp,
+                        )
+                    }
+                }
+
+                // The same event cited again here — kept as evidence, not shouted.
+                entry.boardReferences.forEach { reference ->
+                    Spacer(Modifier.height(5.dp))
+                    Text(
+                        "refers back to ${reference.label} · ${reference.primaryTimecode}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextFaint,
+                        fontSize = 10.5.sp,
+                    )
                 }
             }
         }

@@ -14,20 +14,30 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.luminara.app.data.StudyPackSaver
+import com.luminara.app.ui.screens.AuthScreen
+import com.luminara.app.ui.screens.ClassDetailScreen
+import com.luminara.app.ui.screens.ClassesScreen
 import com.luminara.app.ui.screens.DetailTab
 import com.luminara.app.ui.screens.HomeScreen
 import com.luminara.app.ui.screens.LectureDetailScreen
+import com.luminara.app.ui.screens.LiveScreen
 import com.luminara.app.ui.screens.OnboardingScreen
 import com.luminara.app.ui.screens.ProcessingScreen
 import com.luminara.app.ui.screens.SetupScreen
+import com.luminara.app.ui.screens.UploadLectureScreen
 import com.luminara.app.viewmodel.LuminaraViewModel
 
 object Routes {
     const val ONBOARDING = "onboarding"
+    const val AUTH = "auth"
     const val HOME = "home"
     const val SETUP = "setup"
     const val PROCESSING = "processing"
+    const val LIVE = "live"
     const val DETAIL = "detail"
+    const val CLASSES = "classes"
+    const val CLASS_DETAIL = "class"
+    const val UPLOAD = "upload"
 
     fun detail(tab: String = DetailTab.OVERVIEW.key) = "$DETAIL/$tab"
 }
@@ -38,10 +48,15 @@ fun LuminaraApp(vm: LuminaraViewModel = viewModel()) {
     val state by vm.state.collectAsState()
     val context = LocalContext.current
 
-    // The welcome flow is shown only until the student has chosen a language;
-    // the choice is read from local storage before the first frame.
-    val start = remember(state.onboarded) {
+    // Evaluated once, deliberately. Keying this on `onboarded` rebuilds the nav
+    // graph the moment onboarding completes, which resets the back stack to the
+    // new start destination and swallowed the navigation to the auth screen.
+    val start = remember {
         if (state.onboarded) Routes.HOME else Routes.ONBOARDING
+    }
+
+    fun toast(message: String) {
+        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
     }
 
     fun launchPack(share: Boolean) {
@@ -54,24 +69,34 @@ fun LuminaraApp(vm: LuminaraViewModel = viewModel()) {
         try {
             context.startActivity(intent)
         } catch (e: ActivityNotFoundException) {
-            Toast.makeText(
-                context,
-                "No app on this device can open a ${if (pack.isPdf) "PDF" else "web page"}.",
-                Toast.LENGTH_LONG,
-            ).show()
+            toast("No app on this device can open a ${if (pack.isPdf) "PDF" else "web page"}.")
         }
     }
+
+    fun goHome() = nav.navigate(Routes.HOME) { popUpTo(Routes.HOME) { inclusive = true } }
 
     NavHost(navController = nav, startDestination = start) {
         composable(Routes.ONBOARDING) {
             OnboardingScreen(
                 initialLanguage = state.language,
-                onContinue = { code ->
-                    vm.completeOnboarding(code)
-                    nav.navigate(Routes.HOME) {
+                initialName = state.displayName,
+                initialRole = state.role,
+                onContinue = { name, role, code ->
+                    vm.completeOnboarding(name, role, code)
+                    nav.navigate(Routes.AUTH) {
                         popUpTo(Routes.ONBOARDING) { inclusive = true }
                     }
                 },
+            )
+        }
+
+        composable(Routes.AUTH) {
+            AuthScreen(
+                state = state,
+                onRegister = { email, password -> vm.register(email, password) { goHome() } },
+                onLogin = { email, password -> vm.login(email, password) { goHome() } },
+                onSkip = { goHome() },
+                onDismissError = vm::dismissAuthError,
             )
         }
 
@@ -87,9 +112,76 @@ fun LuminaraApp(vm: LuminaraViewModel = viewModel()) {
                     vm.loadLecture(id)
                     nav.navigate(Routes.detail(DetailTab.BOB.key))
                 },
+                onLiveLecture = { nav.navigate(Routes.LIVE) },
                 onLanguage = vm::setLanguage,
                 onRefresh = vm::refresh,
                 onBaseUrlChange = vm::setBaseUrl,
+                onClasses = { nav.navigate(Routes.CLASSES) },
+                onOpenClass = { id ->
+                    vm.openClass(id)
+                    nav.navigate(Routes.CLASS_DETAIL)
+                },
+                onUploadLecture = { nav.navigate(Routes.UPLOAD) },
+                onSignIn = { nav.navigate(Routes.AUTH) },
+                onSignOut = vm::signOut,
+            )
+        }
+
+        composable(Routes.CLASSES) {
+            ClassesScreen(
+                state = state,
+                onOpenClass = { id ->
+                    vm.openClass(id)
+                    nav.navigate(Routes.CLASS_DETAIL)
+                },
+                onCreate = { name, subject ->
+                    vm.createClass(name, subject) { created ->
+                        vm.openClass(created.id)
+                        nav.navigate(Routes.CLASS_DETAIL)
+                    }
+                },
+                onJoin = { code ->
+                    vm.joinClass(code) { joined ->
+                        vm.openClass(joined.id)
+                        nav.navigate(Routes.CLASS_DETAIL)
+                    }
+                },
+                onDismissError = vm::dismissClassError,
+                onBack = { nav.popBackStack() },
+            )
+        }
+
+        composable(Routes.CLASS_DETAIL) {
+            ClassDetailScreen(
+                state = state,
+                onOpenLecture = { id ->
+                    vm.loadLecture(id)
+                    nav.navigate(Routes.detail())
+                },
+                onUpload = { nav.navigate(Routes.UPLOAD) },
+                onBack = { nav.popBackStack() },
+            )
+        }
+
+        composable(Routes.UPLOAD) {
+            UploadLectureScreen(
+                state = state,
+                initialClassId = state.classDetail?.schoolClass?.id,
+                onUpload = { title, classId, audio, image ->
+                    vm.uploadLecture(
+                        title = title,
+                        classId = classId,
+                        audio = audio,
+                        image = image,
+                        onProcessing = {
+                            nav.navigate(Routes.PROCESSING) {
+                                popUpTo(Routes.UPLOAD) { inclusive = true }
+                            }
+                        },
+                        onFailed = { message -> toast(message) },
+                    )
+                },
+                onBack = { nav.popBackStack() },
             )
         }
 
@@ -124,9 +216,28 @@ fun LuminaraApp(vm: LuminaraViewModel = viewModel()) {
                         popUpTo(Routes.PROCESSING) { inclusive = true }
                     }
                 },
-                onBack = {
-                    nav.navigate(Routes.HOME) { popUpTo(Routes.HOME) { inclusive = true } }
+                onBack = { goHome() },
+            )
+        }
+
+        composable(Routes.LIVE) {
+            LiveScreen(
+                state = state,
+                onStart = { vm.startLive { message -> toast(message) } },
+                onTogglePause = vm::togglePauseLive,
+                onEnd = {
+                    vm.endLive(
+                        onReady = { id ->
+                            vm.loadLecture(id)
+                            nav.navigate(Routes.detail()) {
+                                popUpTo(Routes.LIVE) { inclusive = true }
+                            }
+                        },
+                        onFailed = { message -> toast(message) },
+                    )
                 },
+                onLeave = vm::abandonLive,
+                onBack = { nav.popBackStack() },
             )
         }
 
@@ -142,9 +253,7 @@ fun LuminaraApp(vm: LuminaraViewModel = viewModel()) {
             LectureDetailScreen(
                 state = state,
                 initialTab = DetailTab.from(entry.arguments?.getString("tab")),
-                onBack = {
-                    nav.navigate(Routes.HOME) { popUpTo(Routes.HOME) { inclusive = true } }
-                },
+                onBack = { nav.popBackStack() },
                 onLanguage = vm::setLanguage,
                 onAsk = vm::ask,
                 onRetryAsk = vm::retryLast,
@@ -162,6 +271,7 @@ fun LuminaraApp(vm: LuminaraViewModel = viewModel()) {
                         }
                     }
                 },
+                onPublish = vm::setPublished,
             )
         }
     }

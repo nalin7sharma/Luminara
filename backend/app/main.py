@@ -22,14 +22,18 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import __version__
+from . import accounts as accounts_router
+from . import live as live_router
+from .accounts import class_ids_for
 from .agents import bob as bob_agent
 from .agents.bob_client import bob_client
+from .auth import current_user, require_teacher
 from .config import DATA_DIR, DEMO_ASSETS, DEMO_DIR, UPLOAD_DIR, settings
 from .db import get_db, init_db
 from .export import studypack
 from .llm import llm
-from .models import Lecture, Note, QAExchange, StageEvent
-from .pipeline import asr, notes as notes_mod, runner, script as script_mod
+from .models import Lecture, Note, QAExchange, SchoolClass, StageEvent, User
+from .pipeline import asr, media, notes as notes_mod, runner, script as script_mod
 from .pipeline import search as search_mod, translate as translate_mod
 
 EXPORT_DIR = DATA_DIR / "exports"
@@ -53,6 +57,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+app.include_router(live_router.router)
+app.include_router(accounts_router.router)
 
 
 @app.on_event("startup")
@@ -112,6 +120,28 @@ def _stage_dicts(lec: Lecture) -> list[dict]:
     ]
 
 
+def _authorize(db: Session, lec: Lecture, user: User | None) -> None:
+    """A class lecture is readable by its teacher, and by its students once published.
+
+    Personal lectures (no class) are untouched by this — the demo and anything
+    you processed yourself stay open, signed in or not.
+    """
+    if not lec.class_id:
+        return
+    if user is None:
+        raise HTTPException(401, "sign in to open a class lecture")
+
+    school_class = db.get(SchoolClass, lec.class_id)
+    if school_class is None:
+        return
+    if school_class.teacher_id == user.id:
+        return
+    if user.id not in {m.user_id for m in school_class.members}:
+        raise HTTPException(403, "you are not in this class")
+    if not lec.published:
+        raise HTTPException(403, "this lecture has not been published yet")
+
+
 def _note_for(db: Session, lecture_id: str, language: str) -> Note | None:
     return db.scalar(
         select(Note).where(Note.lecture_id == lecture_id, Note.language == language)
@@ -126,6 +156,10 @@ def _summary_dict(lec: Lecture) -> dict:
         "topic": k.get("topic", ""),
         "course": lec.course,
         "image_url": f"/api/lectures/{lec.id}/image" if lec.image_path else None,
+        "class_id": lec.class_id,
+        "class_name": lec.school_class.name if lec.school_class else "",
+        "published": bool(lec.published),
+        "owner_id": lec.owner_id,
         "status": lec.status,
         "engine": lec.engine,
         "language": lec.language,
@@ -238,8 +272,30 @@ def config() -> dict:
 
 
 @app.get("/api/lectures")
-def list_lectures(db: Session = Depends(get_db)) -> dict:
-    rows = db.scalars(select(Lecture).order_by(Lecture.created_at.desc())).all()
+def list_lectures(
+    user: User | None = Depends(current_user), db: Session = Depends(get_db)
+) -> dict:
+    """Personal lectures, plus anything visible from the signed-in user's classes.
+
+    A lecture with no class is personal — demo, your own upload, your own live
+    session — and is listed exactly as it was before the classroom layer existed,
+    signed in or not.
+    """
+    rows = list(
+        db.scalars(
+            select(Lecture).where(Lecture.class_id.is_(None)).order_by(Lecture.created_at.desc())
+        )
+    )
+
+    ids = class_ids_for(db, user)
+    if ids and user is not None:
+        query = select(Lecture).where(Lecture.class_id.in_(ids))
+        if user.role != "teacher":
+            # a student sees a class lecture only once the teacher publishes it
+            query = query.where(Lecture.published.is_(True))
+        rows += list(db.scalars(query))
+
+    rows.sort(key=lambda r: r.created_at or datetime.min, reverse=True)
     return {"lectures": [_summary_dict(r) for r in rows]}
 
 
@@ -303,13 +359,29 @@ def create_demo(req: DemoRequest, db: Session = Depends(get_db)) -> dict:
 async def upload_lecture(
     title: str = Form("Classroom lecture"),
     language: str = Form("en"),
+    class_id: str = Form(""),
     audio: UploadFile | None = File(None),
     image: UploadFile | None = File(None),
+    user: User | None = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Ingest a recorded/uploaded lecture: audio (WAV), a board image, or both."""
+    """Ingest a recorded/uploaded lecture: audio (WAV), a board image, or both.
+
+    Optionally attach it to a class the caller teaches — the processing pipeline
+    that follows is identical either way.
+    """
     if audio is None and image is None:
         raise HTTPException(400, "send at least an audio file or a classroom image")
+
+    school_class = None
+    if class_id:
+        if user is None:
+            raise HTTPException(401, "sign in to upload into a class")
+        school_class = db.get(SchoolClass, class_id)
+        if school_class is None:
+            raise HTTPException(404, "class not found")
+        if school_class.teacher_id != user.id:
+            raise HTTPException(403, "only this class's teacher can upload to it")
 
     lecture_id = f"lec-{uuid.uuid4().hex[:10]}"
     folder = UPLOAD_DIR / lecture_id
@@ -317,13 +389,33 @@ async def upload_lecture(
 
     audio_path = image_path = ""
     if audio is not None:
-        audio_path = str(folder / Path(audio.filename or "audio.wav").name)
-        with open(audio_path, "wb") as fh:
+        original = folder / Path(audio.filename or "audio.wav").name
+        with open(original, "wb") as fh:
             shutil.copyfileobj(audio.file, fh)
+        audio_path = str(original)
+
+        # Normalise at the door: a video or an MP3 becomes the 16 kHz mono WAV
+        # the pipeline already consumes, so nothing downstream changes.
+        if media.needs_conversion(original):
+            converted = folder / "audio-16k.wav"
+            ok, why = media.extract_audio_wav(original, converted)
+            if not ok:
+                raise HTTPException(400, why)
+            audio_path = str(converted)
+
     if image is not None:
         image_path = str(folder / Path(image.filename or "board.jpg").name)
         with open(image_path, "wb") as fh:
             shutil.copyfileobj(image.file, fh)
+    elif audio is not None and media.is_video(Path(audio.filename or "")):
+        # A lecture video usually contains the board. Take one frame as a
+        # stand-in so the visual half of the pipeline has something to read;
+        # it is a guess, and it is labelled as a frame rather than a photo.
+        chosen = media.pick_board_frame(
+            folder / Path(audio.filename or "video.mp4").name, folder
+        )
+        if chosen:
+            image_path = str(chosen)
 
     lec = Lecture(
         id=lecture_id,
@@ -333,10 +425,49 @@ async def upload_lecture(
         status="created",
         audio_path=audio_path,
         image_path=image_path,
+        owner_id=user.id if user else None,
+        class_id=school_class.id if school_class else None,
+        course=school_class.name if school_class else "",
+        published=False,
     )
     db.add(lec)
     db.commit()
-    return {"lecture_id": lecture_id, "status": "created"}
+    return {
+        "lecture_id": lecture_id,
+        "status": "created",
+        "class_id": lec.class_id,
+        "published": False,
+    }
+
+
+class PublishRequest(BaseModel):
+    published: bool = True
+
+
+@app.post("/api/lectures/{lecture_id}/publish")
+def publish_lecture(
+    lecture_id: str,
+    req: PublishRequest,
+    teacher: User = Depends(require_teacher),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Make a processed class lecture visible to the students in that class."""
+    lec = db.get(Lecture, lecture_id)
+    if lec is None:
+        raise HTTPException(404, "lecture not found")
+    if not lec.class_id:
+        raise HTTPException(400, "this lecture does not belong to a class")
+
+    school_class = db.get(SchoolClass, lec.class_id)
+    if school_class is None or school_class.teacher_id != teacher.id:
+        raise HTTPException(403, "this is not your class")
+    if req.published and lec.status != "ready":
+        raise HTTPException(409, "process the lecture before publishing it")
+
+    lec.published = bool(req.published)
+    db.commit()
+    log.info("lecture %s published=%s by %s", lec.id, lec.published, teacher.id)
+    return {"lecture_id": lec.id, "published": lec.published, "class_id": lec.class_id}
 
 
 @app.post("/api/lectures/{lecture_id}/process")
@@ -369,10 +500,16 @@ def status(lecture_id: str, db: Session = Depends(get_db)) -> dict:
 
 
 @app.get("/api/lectures/{lecture_id}")
-def get_lecture(lecture_id: str, language: str = "en", db: Session = Depends(get_db)) -> dict:
+def get_lecture(
+    lecture_id: str,
+    language: str = "en",
+    user: User | None = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
     lec = db.get(Lecture, lecture_id)
     if lec is None:
         raise HTTPException(404, "lecture not found")
+    _authorize(db, lec, user)
     return _full_dict(db, lec, language)
 
 
@@ -425,11 +562,17 @@ def _segments_for(lec: Lecture) -> list[dict]:
 
 
 @app.get("/api/lectures/{lecture_id}/script")
-def lecture_script(lecture_id: str, language: str = "en", db: Session = Depends(get_db)) -> dict:
+def lecture_script(
+    lecture_id: str,
+    language: str = "en",
+    user: User | None = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
     """A readable timestamped script, projected from the stored transcript."""
     lec = db.get(Lecture, lecture_id)
     if lec is None:
         raise HTTPException(404, "lecture not found")
+    _authorize(db, lec, user)
     knowledge, served = _knowledge_for(db, lec, language)
     doc = script_mod.build_script(knowledge, _segments_for(lec), served)
     return {**doc, "lecture_id": lec.id, "served_language": served}

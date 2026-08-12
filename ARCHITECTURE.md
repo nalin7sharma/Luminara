@@ -174,6 +174,37 @@ with a second model call would be slower, cost more, and — worse — let the n
 evidence the rest of the app cites. Section titles are translated via a lookup table, so a note
 section is never mislabelled by a model.
 
+**The lecture script** (`script.py`) is the same idea applied to time. It reuses the transcript rows
+already in the database and inverts the fusion source index — every concept, point and cross-modal
+link records the speech timestamps it came from, so the script can show, at 00:59, that this is the
+moment the recurrence relation went on the board. No second transcription, no narration model. If
+the transcript is empty, the script is empty.
+
+Two details make the board markers trustworthy rather than noisy:
+
+* **Citations resolve by inverting the label, not by scanning spans.** The fusion prompt tags each
+  transcript line `[MM:SS]` using the floor of its start, and the model cites those labels back. So a
+  citation of "00:59" means *the line labelled 00:59*. Matching on time spans instead put the
+  recurrence relation on "Notice that every step…" (00:55), and — because spans touch at their
+  boundaries — a single citation could light up two consecutive lines.
+* **One event, one marker.** Citations are clustered by the artefact they name (a formula's exact
+  text, a diagram's title) and, when the claim names nothing identifiable, by temporal proximity.
+  Each cluster gets one primary timestamp — the moment whose spoken words best match the claim — and
+  every other citation is preserved on that moment as secondary evidence. Nothing is discarded; the
+  UI simply stops repeating itself.
+
+**Lecture search** (`search.py`) is lexical, not semantic. It ranks a phrase hit above term coverage
+across speech, formulas, board observations and notes, and returns hits in the same provenance
+vocabulary the source chips already speak. Keeping it deterministic means it is instant, free, and
+cannot hallucinate a citation. When an exact-word match is the wrong tool, the empty state points
+the student at BOB, which *can* reason.
+
+**The study pack** (`export/studypack.py`) is rendered as print-designed HTML and converted by the
+headless Chrome/Edge already on the machine. A PDF text-drawing library places glyphs in code-point
+order, which produces subtly wrong Devanagari — reordered matras and broken conjuncts. The browser
+shapes text with HarfBuzz and gets it right. That matters when the product's whole claim is that a
+student can study in their own language.
+
 **Formula preservation** is enforced by construction, not by prompting. `translate.py` extracts only
 prose fields; `latex` and `plain` are never sent to the translator, and are re-asserted from the
 source after merging. `T(n) = T(n/2) + O(1)` is structurally incapable of returning as Hindi words.
