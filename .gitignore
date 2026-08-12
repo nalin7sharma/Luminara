@@ -26,6 +26,12 @@ android/local.properties
 *.aab
 captures/
 
+# --- deployment ---
+# cloudflared is a 52 MB third-party binary; download it rather than vendor it:
+#   https://github.com/cloudflare/cloudflared/releases/latest
+deploy/cloudflared.exe
+deploy/cloudflared
+
 # --- os / editor / ide ---
 .DS_Store
 Thumbs.db

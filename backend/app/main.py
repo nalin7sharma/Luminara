@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from . import __version__
 from . import accounts as accounts_router
+from . import landing as landing_router
 from . import live as live_router
 from .accounts import class_ids_for
 from .agents import bob as bob_agent
@@ -61,6 +62,7 @@ app.add_middleware(
 
 app.include_router(live_router.router)
 app.include_router(accounts_router.router)
+app.include_router(landing_router.router)
 
 
 @app.on_event("startup")

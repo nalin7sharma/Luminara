@@ -23,8 +23,15 @@ class Prefs(context: Context) {
         set(value) = sp.edit().putBoolean(KEY_ONBOARDED, value).apply()
 
     var baseUrl: String
-        get() = sp.getString(KEY_BASE_URL, LuminaraApi.DEFAULT_BASE_URL)
-            ?: LuminaraApi.DEFAULT_BASE_URL
+        get() {
+            val stored = sp.getString(KEY_BASE_URL, null) ?: return LuminaraApi.DEFAULT_BASE_URL
+            // A release build must never inherit a development address — for
+            // instance from an earlier debug install on the same device.
+            if (!LuminaraApi.isDebugBuild && LOCAL_HOSTS.any { stored.contains(it) }) {
+                return LuminaraApi.DEFAULT_BASE_URL
+            }
+            return stored
+        }
         set(value) = sp.edit().putString(KEY_BASE_URL, value).apply()
 
     /** How the student described themselves at onboarding, before any account. */
@@ -55,6 +62,9 @@ class Prefs(context: Context) {
         private const val KEY_NAME = "name"
         private const val KEY_TOKEN = "auth_token"
         const val DEFAULT_LANGUAGE = "en"
+        private val LOCAL_HOSTS = listOf(
+            "10.0.2.2", "127.0.0.1", "localhost", "192.168.", "172.16.", "172.18.",
+        )
     }
 }
 

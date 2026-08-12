@@ -134,14 +134,35 @@ threshold skip Whisper entirely, and any transcript that is one phrase repeated 
 | 79 | Video upload | `pipeline/media.py` extracts the audio track to 16 kHz mono WAV using the ffmpeg bundled with `imageio-ffmpeg`; the pipeline itself is unchanged | 6-minute lecture video → 69 segments, 5 concepts, 3 visual observations | ✅ |
 | 80 | Board image from a video | Three frames sampled (30/55/80%) and ranked by edge density; the most board-like is kept and labelled as a frame | Test MP4 → frame 1 chosen, others discarded | 🟡 heuristic; attaching a photo overrides it |
 
-## Explicitly out of scope (Priority 3 / future scope)
+## Public deployment
+
+| # | Requirement | How it is met | Evidence | Status |
+|---|---|---|---|---|
+| 81 | Backend reachable over public HTTPS | Cloudflare Tunnel (`--protocol http2`) in front of uvicorn | `/health` → `status: ok`, `bob: true`, `whisper: true` | ✅ |
+| 82 | No USB / `adb reverse` / LAN address | Release build compiles the public URL into `BuildConfig`; localhost auto-discovery compiled out | Account registered from the phone on mobile data, WiFi off, `adb reverse --list` empty | ✅ |
+| 83 | Full pipeline runs on the deployment | Same code path, no cut-down mode | 8/8 stages `done` in 93 s; `bob:premium` on understanding, `whisper:base` on speech | ✅ |
+| 84 | Secrets never reach the client | Keys live in `backend/.env`, server-side only | APK scan for key material and provider hostnames → **none** | ✅ |
+| 85 | Stable download URL | `GET /luminara.apk` is fixed; rebuilds replace the file behind it | 11.39 MB, `application/vnd.android.package-archive` | ✅ |
+| 86 | Public download page | `GET /download`, with live service status | 200 | ✅ |
+| 87 | QR code for judges | Points at the **page**, not a versioned file | `deploy/luminara-qr.png` | ✅ |
+| 88 | Deployment documented | Provider, secrets, rebuild and redeploy steps | `DEPLOYMENT.md` | ✅ |
+| 89 | Local development preserved | Debug builds keep `10.0.2.2` + auto-discovery | `./gradlew installDebug` unchanged | ✅ |
+
+Hosted free tiers were assessed and rejected on measured RAM (Whisper `base` needs 763 MB; Render /
+Fly / Koyeb free tiers offer 256–512 MB). Hugging Face Spaces returns **402 Payment Required** for
+Docker Spaces on a free account. The Docker image and HF deploy script are kept ready for a host
+with ≥2 GB RAM — see DEPLOYMENT.md §2 and §7.
+
+---
+
+## Explicitly out of scope (future scope)
 
 | Item | Status |
 |---|---|
-| Live classroom streaming / real-time transcription | ⬜ |
-| In-app recording and camera capture | ⬜ |
-| User accounts, roles, cloud sync | ⬜ |
-| Analytics, notifications | ⬜ |
+| Assignments, grading, attendance, teacher analytics | ⬜ |
+| Institution administration, fine-grained permissions | ⬜ |
+| Web and desktop clients | ⬜ |
+| Cloud sync across devices | ⬜ |
 | On-device foundation-model inference | ⬜ |
 | Languages beyond en/hi verified by native speakers | ⬜ |
 

@@ -3,6 +3,7 @@ package com.luminara.app.data
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import com.luminara.app.BuildConfig
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
@@ -23,8 +24,17 @@ sealed interface ApiResult<out T> {
 
 object LuminaraApi {
 
-    /** 10.0.2.2 is the host machine as seen from the Android emulator. */
-    const val DEFAULT_BASE_URL = "http://10.0.2.2:8000"
+    /**
+     * Where this build talks to by default.
+     *
+     * Release builds ship the deployed HTTPS backend, so a judge installs the
+     * APK and it simply works — no USB, no LAN address, no settings. Debug
+     * builds keep pointing at the development machine.
+     */
+    val DEFAULT_BASE_URL: String = BuildConfig.API_BASE_URL
+
+    /** Development convenience only; never used by a release build. */
+    val isDebugBuild: Boolean = BuildConfig.DEBUG
 
     @Volatile
     var baseUrl: String = DEFAULT_BASE_URL

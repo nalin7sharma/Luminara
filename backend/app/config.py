@@ -15,7 +15,10 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 APP_DIR = BACKEND_DIR / "app"
 DEMO_DIR = APP_DIR / "demo"
 DEMO_ASSETS = DEMO_DIR / "assets"
-DATA_DIR = BACKEND_DIR / "data"
+
+# LUMINARA_DATA_DIR lets a deployment point the database and uploads at a
+# mounted volume. Unset — as in local development — it is backend/data.
+DATA_DIR = Path(os.environ.get("LUMINARA_DATA_DIR", "").strip() or (BACKEND_DIR / "data"))
 UPLOAD_DIR = DATA_DIR / "uploads"
 
 for _d in (DATA_DIR, UPLOAD_DIR):

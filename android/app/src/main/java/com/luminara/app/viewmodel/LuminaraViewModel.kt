@@ -129,11 +129,20 @@ data class UiState(
     val readyLectures get() = lectures.filter { it.status == "ready" }
 }
 
-/** Hosts tried automatically when the configured backend does not answer. */
-private val BACKEND_CANDIDATES = listOf(
-    "http://10.0.2.2:8000",   // Android emulator -> host machine
-    "http://127.0.0.1:8000",  // physical device with `adb reverse tcp:8000 tcp:8000`
-)
+/**
+ * Development-only fallbacks. A release build points at the deployed HTTPS
+ * backend and must never silently wander onto a localhost address, so this list
+ * is empty outside debug builds.
+ */
+private val BACKEND_CANDIDATES: List<String> =
+    if (LuminaraApi.isDebugBuild) {
+        listOf(
+            "http://10.0.2.2:8000",   // Android emulator -> host machine
+            "http://127.0.0.1:8000",  // physical device with `adb reverse tcp:8000 tcp:8000`
+        )
+    } else {
+        emptyList()
+    }
 
 class LuminaraViewModel(app: Application) : AndroidViewModel(app) {
 
