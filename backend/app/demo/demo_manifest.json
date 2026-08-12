@@ -1,0 +1,10 @@
+{
+  "id": "demo-binary-search",
+  "title": "Binary Search",
+  "course": "CS 201 \u2014 Data Structures & Algorithms",
+  "source_type": "demo",
+  "audio": "lecture.wav",
+  "image": "whiteboard.png",
+  "spoken_script_reference": "Good morning everyone. Today we are going to study binary search. Binary search works only on a sorted array. The key idea is that we repeatedly divide the search space into two halves. We begin by comparing the target with the middle element. If the middle element is equal to the target, we are done. If the target is smaller, we throw away the entire right half. If the target is larger, we throw away the left half. Every single comparison removes half of the remaining elements. That is why the time complexity is big O of log n, and not big O of n like linear search. On the board I have drawn a binary search tree, with fifty at the root, twenty five as the left child, and seventy five as the right child. Notice that every step of the search moves you one level down this tree. I have also written the recurrence relation on the board. Please copy it into your notes, because we will use it again when we study merge sort.",
+  "note": "Both assets are real inputs. The audio is synthesised narration that Whisper transcribes at run time; the whiteboard is an image that OCR and the vision model read at run time. No pipeline output is pre-baked into these files."
+}

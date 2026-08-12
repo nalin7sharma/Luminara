@@ -1,0 +1,21 @@
+# Luminara backend — Python 3.12
+# Most of these are already present on the build machine; versions are the
+# minimum verified to work together.
+
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.6
+python-multipart>=0.0.9
+SQLAlchemy>=2.0
+httpx>=0.27
+python-dotenv>=1.0
+Pillow>=10.0
+numpy>=1.24
+
+# Speech recognition (local, offline). Pulls in torch.
+# The `base` model (~145 MB) is downloaded once to ~/.cache/whisper.
+openai-whisper>=20231117
+
+# Optional: local OCR fallback when no multimodal key is configured.
+# Not required for the primary demo path.
+# easyocr>=1.7

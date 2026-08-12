@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Luminara mark: a lit aperture — the lecture, understood. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:fillColor="#7C5CFF"
+        android:pathData="M54,30 C67.3,30 78,40.7 78,54 C78,67.3 67.3,78 54,78 C40.7,78 30,67.3 30,54 C30,40.7 40.7,30 54,30 Z M54,38 C45.2,38 38,45.2 38,54 C38,62.8 45.2,70 54,70 C62.8,70 70,62.8 70,54 C70,45.2 62.8,38 54,38 Z" />
+    <path
+        android:fillColor="#38E1C6"
+        android:pathData="M54,44 m-8,0 a8,8 0 1,0 16,0 a8,8 0 1,0 -16,0" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.9"
+        android:pathData="M52,58 L56,58 L56,72 L52,72 Z" />
+</vector>

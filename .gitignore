@@ -1,0 +1,36 @@
+# --- secrets: never commit ---
+.env
+*.env
+!.env.example
+backend/.env
+android/local.properties
+
+# --- python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.db
+*.sqlite3
+backend/data/
+backend/.pytest_cache/
+
+# --- android / gradle ---
+android/.gradle/
+android/build/
+android/app/build/
+android/.idea/
+android/local.properties
+*.iml
+*.apk
+*.aab
+captures/
+
+# --- os / editor / ide ---
+.DS_Store
+Thumbs.db
+*.log
+scratch/
+.bob/
+.bobide/
+.vscode/
