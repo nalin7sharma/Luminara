@@ -16,7 +16,7 @@ in the room are far more comfortable learning in Hindi, Bangla or Arabic.
 Speech translation alone does not solve this, because **the lecture is not only speech**. In our
 demo lecture the professor never says the recurrence relation out loud. She says:
 
-> "I have also written the recurrence relation on the board. Please copy it into your notes."
+> "I have also written the recurrence relation on the board. Please copy it into your notes. "
 
 A transcript-and-translate product loses `T(n) = T(n/2) + O(1)` entirely. The student ends up with
 a fluent translation of a lecture they still cannot follow.
