@@ -3,149 +3,220 @@
 ### Understand the lecture. Learn your way.
 
 **BOB Hacks'26 — Problem Statement 1: The Smart Classroom**
-Prototype type: **native Android application** (Kotlin + Jetpack Compose) with a Python FastAPI backend.
+Native **Android** application (Kotlin + Jetpack Compose) with a **Python FastAPI** backend.
 
 ---
 
 ## 1. The problem
 
-A university Computer Science professor teaches in English. She explains ideas out loud, draws a
-binary search tree on the board, writes a recurrence relation, and displays a graph. Some students
-in the room are far more comfortable learning in Hindi, Bangla or Arabic.
+A professor teaches in English. She explains ideas aloud, draws a binary search tree on the board,
+writes a recurrence relation, and points at a graph. Some students in the room follow Hindi, Bangla
+or Arabic far more comfortably.
 
-Speech translation alone does not solve this, because **the lecture is not only speech**. In our
-demo lecture the professor never says the recurrence relation out loud. She says:
+Speech translation alone does not solve this, because **a lecture is not only speech.** In our demo
+lecture the professor never says the recurrence relation out loud. She says:
 
 > "I have also written the recurrence relation on the board. Please copy it into your notes."
 
-A transcript-and-translate product loses `T(n) = T(n/2) + O(1)` entirely. The student ends up with
-a fluent translation of a lecture they still cannot follow.
+A transcribe-and-translate product loses `T(n) = T(n/2) + O(1)` entirely. The student receives a
+fluent translation of a lecture they still cannot follow.
 
-## 2. The solution
+## 2. The Luminara solution
 
-Luminara is **multimodal lecture intelligence**. It understands what the teacher *says*, what the
-teacher *writes*, and what the teacher *draws*, fuses them into a single lecture object, and turns
-that into personalised multilingual study material plus a lecture-aware AI agent.
+Luminara is **multimodal lecture intelligence.** It understands what the teacher *says*, what the
+teacher *writes*, and what the teacher *draws*; fuses them into a single lecture object; and turns
+that object into multilingual study material plus a lecture-grounded AI agent.
 
 ```
-Lecture input (audio + classroom image)
-        ↓
-Speech recognition        Board OCR + diagram understanding      ← two independent evidence streams
-        ↓                              ↓
-        └──────────► Multimodal fusion ◄──────────┘
-                             ↓
-                   LECTURE KNOWLEDGE
-        (summary · concepts · terms · formulas ·
-         visual observations · cross-modal links · sources)
-                             ↓
-        ┌────────────┬───────────────┬──────────────┐
-   Structured      Translation      BOB agent
-     notes        (en · hi · …)   (grounded Q&A, quiz,
-                                   simple explanations)
+Lecture input (audio / video + classroom image)
+        │
+   ┌────┴─────────────────────┐
+Speech recognition      Board OCR + diagram understanding    ← two independent evidence streams
+   └────┬─────────────────────┘
+        ▼
+   Multimodal fusion
+        ▼
+  LECTURE KNOWLEDGE
+  (summary · concepts · terms · formulas · visual observations ·
+   cross-modal links · per-claim sources)
+        │
+   ┌────┴──────┬──────────────┬───────────────┐
+Structured   Translation   Study pack     BOB agent
+  notes      (en/hi/bn/ar)    (PDF)     (grounded Q&A)
 ```
 
-The design rule that makes this real rather than cosmetic: **speech and vision are analysed
-separately, and the vision model is never shown the transcript.** So when the app says a formula
-came from the whiteboard and not from the professor's words, that is structurally true, not a label.
+The design rule that makes this structural rather than cosmetic: **speech and vision are analysed
+separately, and the vision pass never receives the transcript.** When the app says a formula came
+from the whiteboard rather than from the professor's words, that is true by construction.
 
-## 3. What it demonstrates
+## 3. Key features
 
 | Capability | Where you see it |
 |---|---|
-| Speech recognition | Processing screen · transcript on the Dashboard |
-| Classroom OCR | Visual Understanding screen — verbatim board text |
-| Computer vision / diagram understanding | "50 is the root node, 25 is the left child of 50, 75 is the right child" |
-| Formula preservation | `T(n) = T(n/2) + O(1)` rendered in monospace, untouched by translation |
-| Structured notes | 8 sectioned note cards |
-| Translation | Full Hindi study material with technical terms kept in English |
-| Simple explanation | "Simple Explanation" section + BOB's `explain_simple` intent |
-| Lecture Q&A | Ask BOB, with source chips (`Speech · 00:40`, `Whiteboard`) |
-| BOB integration | Every reasoning stage runs on the IBM Bob inference gateway |
-| Lecture library | My Lectures — thumbnail, status, language, duration, formulas, date |
+| Speech recognition | Processing stages · Script tab · timestamped transcript |
+| Classroom OCR | Visuals tab — verbatim board text |
+| Diagram and graph understanding | "50 is the root node, 25 is the left child of 50, 75 is the right child" |
+| Formula preservation | `T(n) = T(n/2) + O(1)` intact inside Hindi prose |
+| Structured notes | Eight sectioned note cards, including "What the Board Added" |
+| Translation | Full study material in the chosen language, technical terms kept in English |
+| Lecture-grounded Q&A | Ask BOB, with tappable source chips (`Speech · 00:59`, `Whiteboard`) |
 | Lecture script | Timestamped account of the class, searchable, linked to board moments |
-| Downloadable study pack | A4 PDF with notes, script, formulas and the board image |
-| In-lecture search | "where was the formula written" → the exact evidence, with its source |
-| Live Lecture | Near-real-time bilingual transcript during class, ~12s behind, then saved as a normal lecture |
+| Study pack | A4 PDF: summary, concepts, formulas, board image, terms, full script |
+| Lecture search | "where was the formula written" → the exact evidence and its source |
+| My Lectures | Library with thumbnail, status, language, duration, formula count, date |
+| Live Lecture | Near-real-time bilingual transcript during class, then saved as a normal lecture |
+| Classes | Teacher creates a class and a join code; students join and receive published lectures |
 
-## 4. BOB integration
+## 4. Student and teacher flow
 
-BOB is not a chat window bolted onto the side of this product. **IBM Bob is the reasoning engine for
-the entire pipeline** — it reads the whiteboard, interprets the diagram, fuses the modalities, writes
-the notes, translates them, and answers the student's questions.
+Onboarding asks for a **role**, a name and a preferred language. Signing in is **optional** — the
+demo lecture, personal uploads and live sessions all work without an account. An account is needed
+only to join or teach a class.
 
-* Gateway: `https://api.us-east.bob.ibm.com/inference/v1` (OpenAI-compatible)
-* Auth: `Authorization: apikey <key>`
-* Models used: `premium` (Claude Sonnet 4.5, vision-capable) for OCR/vision/fusion/agent,
-  `fast` (Claude Haiku 4.5) for translation
-* Every response is tagged with the engine that produced it (`bob:premium`, `bob:fast`) and the
-  app displays that tag. Nothing is attributed to BOB that BOB did not generate.
+**Teacher**
+
+```
+Sign in → Create Class (name + subject) → join code issued
+       → Upload Lecture (video / audio / image, into a class)
+       → same processing pipeline → review in Lecture Detail → Publish
+```
+
+**Student**
+
+```
+Sign in → Join Class with the code → class appears on Home
+       → open a published lecture → the same Lecture Detail everyone uses
+       → Notes · Script · Visuals · Formulas · Ask BOB · Sources · Study pack
+```
+
+Publishing is the gate: a lecture starts unpublished and students cannot see it until the teacher
+publishes it. Teacher-only routes reject students, non-members receive `403`, and anonymous callers
+receive `401` on class lectures.
+
+Accounts are email + password, hashed with PBKDF2-SHA256 (240,000 rounds, per-user salt), with a
+signed, expiring bearer token. Passwords are never returned by any endpoint.
+
+## 5. Live and recorded lectures
+
+Both paths converge on the same lecture object.
+
+**Recorded** — upload audio, video or a board image (or open the bundled demo lecture). Video and
+compressed audio are normalised at the door to 16 kHz mono WAV; the pipeline itself is unchanged.
+If no board photo is attached to a video, three frames are sampled and the most board-like is used,
+labelled as a frame rather than a photograph.
+
+**Live** — the phone records the class and posts **9-second chunks** to the same local speech
+recognition and the same translation path. The screen shows the original, the translation and the
+current delay. **End lecture** hands the accumulated transcript to the identical reasoning step, so
+a live session becomes an ordinary lecture with notes, script, agent and study pack.
+
+This is deliberately called **near real time, not real time.** A 9-second chunk cannot be
+transcribed before it has been spoken, so the student is always at least one chunk behind, plus
+processing. The backend returns a measured `behind_ms`, `/api/live/config` reports
+`realtime: false`, and the app displays that number while recording. Measured on the deployed
+backend: **~11.5 s behind**.
+
+Live sessions have no classroom image, so their Visuals and Formulas tabs are honestly empty. Silent
+chunks are gated before transcription, repetitive recognition artefacts are discarded, and a session
+that captured no speech **refuses to become a lecture** rather than inventing one.
+
+## 6. The multimodal AI pipeline
+
+Eight stages, each a database row with a real start time, end time and the engine that did the work.
+The Processing screen renders those rows directly — there is no simulated progress, and a skipped
+stage records why.
+
+| # | Stage | Engine |
+|---|---|---|
+| 1 | Lecture audio decoded | stdlib `wave` + NumPy |
+| 2 | Teacher speech recognised | local speech recognition (`base`, CPU) |
+| 3 | Classroom text extracted | IBM BOB `premium` (vision) |
+| 4 | Visual content analysed | IBM BOB `premium` + a local geometry pass |
+| 5 | Lecture understood (fusion) | IBM BOB `premium` |
+| 6 | Learning material generated | deterministic projection, no model call |
+| 7 | Translated for the student | IBM BOB `fast` |
+| 8 | BOB ready | context compilation |
+
+Measured end to end on the deployed backend: **93 s**. Results are cached in SQLite, so re-opening a
+lecture is instant.
+
+Some things are deliberately *not* model calls: notes are a projection of the lecture knowledge, the
+script reuses the stored transcript, and search is lexical. Keeping them deterministic makes them
+instant, free, and incapable of drifting away from the evidence the rest of the app cites.
+
+## 7. IBM BOB integration
+
+BOB is not a chat window bolted onto the side. **IBM BOB is the reasoning engine for the entire
+pipeline** — it reads the whiteboard, interprets the diagram, fuses the modalities, writes the
+notes, translates them, and answers the student's questions.
+
+* Gateway: `https://api.us-east.bob.ibm.com/inference/v1`
+* Auth: `Authorization: apikey <key>` — not Bearer
+* Models: `premium` (vision-capable) for OCR, vision, fusion and the agent; `fast` for translation
+* Every response carries the engine that produced it (`bob:premium`, `bob:fast`), and the app
+  displays that badge. Nothing is attributed to BOB that BOB did not generate.
 
 Three things make BOB an *agent over this lecture* rather than a generic assistant:
 
-1. **Context compilation** — the lecture knowledge is compiled into an evidence block where every
+1. **Context compilation** — the lecture knowledge is compiled into an evidence block in which every
    fact carries its origin (speech timestamp, whiteboard, diagram, formula).
-2. **Intent routing** — `qa`, `explain_simple`, `diagram`, `formula`, `translate`, `quiz` change
-   what BOB is asked to produce, not merely how it phrases the reply.
+2. **Intent routing** — `qa`, `explain_simple`, `diagram`, `formula`, `translate` and `quiz` change
+   what BOB is asked to produce, not merely how it phrases the answer.
 3. **Grounded output contract** — BOB returns structured JSON with citations and a `grounded` flag,
    and says plainly when the lecture does not contain an answer instead of inventing one.
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for how the endpoint, auth scheme and model list were
-determined from the shipped IBM Bob client.
+The endpoint, auth scheme, WAF requirement and model catalogue were each determined from the shipped
+IBM BOB client and then confirmed against the live service — see [ARCHITECTURE.md](ARCHITECTURE.md)
+§6.
 
-## 5. Architecture
+## 8. Architecture
 
-**Android app** (`android/`) — Kotlin, Jetpack Compose (Material 3), MVVM with a single
-`LuminaraViewModel`, OkHttp + kotlinx.serialization, Coil, Navigation-Compose.
-Flow: Welcome (language) → Home → Lecture Setup → Processing → **Lecture Detail**.
+**Android** (`android/`) — Kotlin, Jetpack Compose (Material 3), MVVM with a single
+`LuminaraViewModel`, OkHttp + kotlinx.serialization, Coil, Navigation-Compose. Eleven screens:
+Onboarding, Auth, Home, Classes, Class Detail, Upload Lecture, Lecture Setup, Processing, Lecture
+Detail, Live, and Ask BOB.
 
-Lecture Detail is one screen with seven tabs — Overview, Script, Notes, Visuals, Formulas,
-Ask BOB, Sources — and every source chip in it is navigation: tap a `Speech · 00:59` chip on a note
-or a BOB answer and you land on that moment of the script.
+Lecture Detail is one screen with seven tabs — Overview, Script, Notes, Visuals, Formulas, Ask BOB,
+Sources — and every source chip is navigation: tap `Speech · 00:59` on a note or a BOB answer and
+you land on that moment of the script.
 
 **Backend** (`backend/`) — one FastAPI service, SQLite via SQLAlchemy.
 
 ```
 app/
-  main.py                 REST API
-  llm.py                  provider router: IBM Bob → Gemini → local
+  main.py            lecture REST API
+  live.py            /api/live — start · chunk · pause · state · finish · config
+  accounts.py        /api — auth, classes, membership
+  landing.py         /download and /luminara.apk
+  llm.py             provider router; every result carries its engine
+  auth.py            password hashing and signed tokens
   config.py  db.py  models.py
   pipeline/
-    asr.py                Whisper, ffmpeg-free WAV decoding
-    vision.py             board OCR + diagram interpretation (+ OpenCV geometry pass)
-    understanding.py      multimodal fusion → LectureKnowledge
-    notes.py              deterministic projection into note sections
-    script.py             timestamped lecture script (reuses the stored transcript)
-    search.py             lexical search over speech/board/formulas/notes
-    translate.py          formula-safe translation
-    runner.py             staged orchestration, real timings
-  export/
-    studypack.py          print-designed HTML → PDF via the local headless browser
-  agents/
-    bob.py                the lecture-grounded agent
-    bob_client.py         pluggable BOB transport (openai/anthropic/gemini/custom)
-  demo/                   demo lecture assets + manifest
+    asr.py           speech recognition, ffmpeg-free WAV decoding
+    media.py         video / compressed audio → 16 kHz mono WAV; board-frame picking
+    vision.py        board OCR + diagram interpretation (+ local geometry pass)
+    understanding.py multimodal fusion → LectureKnowledge
+    notes.py         deterministic projection into note sections
+    script.py        timestamped lecture script from the stored transcript
+    search.py        lexical search over speech / board / formulas / notes
+    translate.py     formula-safe translation
+    runner.py        staged orchestration with real timings
+  export/studypack.py  print-designed HTML → PDF via the local headless browser
+  agents/bob.py        the lecture-grounded agent
+  agents/bob_client.py pluggable BOB transport
+  demo/                demo lecture assets + manifest
 ```
 
-## 6. AI components
+Full detail in [ARCHITECTURE.md](ARCHITECTURE.md).
 
-| Stage | Engine | Runs where |
-|---|---|---|
-| Speech recognition | OpenAI Whisper `base` | Locally on CPU, no API key, no ffmpeg |
-| Board OCR + diagram/graph reading | IBM Bob `premium` (vision) | Bob gateway |
-| Multimodal fusion → lecture knowledge | IBM Bob `premium` | Bob gateway |
-| Structured notes | Deterministic projection | Backend, no model call |
-| Translation | IBM Bob `fast` | Bob gateway |
-| Shape structure (nodes/edges) | OpenCV Hough transform | Locally |
-| BOB agent | IBM Bob `premium` | Bob gateway |
-
-## 7. Setup
+## 9. Setup
 
 Full instructions in [SETUP.md](SETUP.md). Short version:
 
 ```bash
 # backend
 cd backend
-cp .env.example .env          # add BOB_API_KEY
+cp .env.example .env                 # add BOB_API_KEY
 pip install -r requirements.txt
 python scripts/make_demo_assets.py
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
@@ -156,92 +227,61 @@ cd android
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-The app talks to `http://10.0.2.2:8000` (the host machine as seen from the emulator). On a physical
-device, set your LAN IP with the gear icon on the Home screen.
+A debug build targets `http://10.0.2.2:8000` (the host machine as seen from the emulator) and falls
+back to `127.0.0.1:8000` for a USB-connected device via `adb reverse`.
 
-## 8. Demo flow
+## 10. Demo
 
-See [DEMO.md](DEMO.md) for the full 2–3 minute script. In brief: open Luminara → choose **Hindi** →
-**Start lecture** → watch the real pipeline stages → Dashboard shows Hindi notes with
-`T(n) = T(n/2) + O(1)` intact → **The board** shows the OCR text and the diagram reading →
-**Ask BOB**: *"Explain the diagram in simple Hindi"*, *"What formula did the professor write?"*,
-*"Give me three quiz questions"* — each answer carrying source chips.
+See [DEMO.md](DEMO.md) for the 2–3 minute script. In brief: open Luminara → choose **Hindi** →
+**Start lecture** → watch real pipeline stages → Hindi notes with `T(n) = T(n/2) + O(1)` intact →
+**Visuals** shows the board OCR and the diagram reading → **Ask BOB**: *"What formula did the
+professor write?"* — answered with source chips and an engine badge.
 
-## 9. Honesty about what is real
+## 11. Deployment
 
-Everything shown in the demo is produced at run time:
+A judge can scan a QR code, install the APK, sign in and use the real pipeline with no cable, no
+`adb reverse` and no LAN address.
 
-* the narration is genuinely transcribed by Whisper (70.2 s of audio → 11 timestamped segments);
-* the whiteboard is genuinely read by a vision model at run time;
-* the progress stages are database rows with real start/end timestamps — no simulated progress;
-* if a stage is skipped or fails, the app says so and names the reason.
+The backend runs behind a **Cloudflare Tunnel** on public HTTPS; the release APK compiles that URL
+into `BuildConfig` and compiles the local auto-discovery **out**, so a public build can never wander
+onto a localhost address. `GET /download` serves an install page with live service status and
+`GET /luminara.apk` is a stable path, so a printed QR survives a rebuild.
 
-Two things are *generated inputs*, not generated outputs, and are documented as such: the demo
-lecture's narration is Windows SAPI text-to-speech, and the whiteboard is a rendered image
-(`backend/scripts/make_demo_assets.py`). They are inputs to the pipeline, exactly as a real
-recording and a real photograph would be.
+Verified from a physical device with WiFi off, mobile data only and no `adb reverse`: registration,
+Hindi lecture detail, Ask BOB, study pack PDF, live lecture, and the download page serving a
+byte-identical APK.
 
-## 9b. Live Lecture
+Provider choice, measured free-tier constraints, secret handling and the redeploy steps are in
+[DEPLOYMENT.md](DEPLOYMENT.md).
 
-Live mode records the class on the phone and posts 9-second chunks to the same local Whisper and the
-same translation path the recorded pipeline uses. Pressing **End lecture** hands the accumulated
-transcript to the identical reasoning step, so a live lecture becomes an ordinary lecture — notes,
-script, BOB and study pack included.
+## 12. Limitations
 
-It is **near real time, not real time**. A 9-second chunk cannot be transcribed before it has been
-spoken, so the student is always at least one chunk behind, plus processing. Measured on the build
-machine: **10.3–13.4 s, mean 12.3 s**, and the app shows that number while recording rather than
-implying instant translation.
+* **The public URL is ephemeral.** It lives as long as the tunnel process; restarting it means
+  rebuilding the APK and the QR code.
+* **The laptop is the server.** No hosted free tier tested could run the local speech model — they
+  offer 256–512 MB against the 763 MB it needs.
+* In-app camera capture of a board photo is not implemented; teachers attach an image at upload.
+* Board-frame selection from video is a heuristic (edge density across three sampled frames);
+  attaching a photo overrides it.
+* Speech recognition runs on CPU, so a full lecture takes ~93 s and a single worker serialises
+  concurrent uploads.
+* English and Hindi are verified end to end. Bangla and Arabic use the same code path and are
+  offered in the language selector, but have not been reviewed by a speaker.
+* Assignments, grading, attendance, analytics, institution administration, web and desktop clients
+  and cross-device sync are out of scope.
 
-Live sessions have no classroom image, so the Visuals and Formulas tabs are honestly empty for them.
-If nothing audible was captured, Luminara refuses to create a lecture at all.
+## 13. Future scope
 
-## 9c. Classroom: teachers, students and classes
+Incremental streaming transcription · in-app board capture · per-student personalisation from past
+questions · richer LaTeX rendering · on-device inference for low-connectivity classrooms · more
+languages with native-speaker review · teacher analytics on which concepts were re-asked most ·
+a named tunnel or hosted deployment to remove the ephemeral URL.
 
-A thin layer over the same lecture system. A teacher creates a class and gets a six-character join
-code; students enter the code and the class appears on their home screen. The teacher uploads a
-lecture **into the existing pipeline** — same upload route, same processing, same LectureKnowledge —
-reviews the result, and presses Publish. Only then do students see it, and it opens in the same
-Lecture Detail everything else uses.
-
-* Accounts are email + password, hashed with PBKDF2-SHA256 and a per-user salt, with a signed,
-  expiring bearer token. The signing secret comes from `AUTH_SECRET` or is generated into
-  `backend/data/` on first run — never the repository.
-* **Signing in is optional.** The demo lecture, your own uploads and your own live sessions work as
-  a guest, exactly as before. An account is needed only to join or teach a class.
-* A lecture with no class is a personal lecture and behaves as it always did.
-
-**Video uploads** are supported at the door rather than in the pipeline: `pipeline/media.py`
-extracts the audio track to the same 16 kHz mono WAV Whisper already consumes, using the ffmpeg
-bundled with `imageio-ffmpeg` (nothing to install). If the teacher does not attach a board photo,
-three frames are sampled across the recording and the most board-like is used — a heuristic, and
-labelled as a frame rather than a photograph.
-
-## 10. Limitations
-
-* Teachers upload from the app; students record live. In-app camera capture of a board photo is not
-  implemented.
-* Video and compressed audio are converted at upload using the bundled ffmpeg. If that binary is
-  ever unavailable, uploads other than 16 kHz mono WAV are rejected with a clear message rather
-  than failing later in transcription.
-* Whisper runs on CPU here (no CUDA on the build machine), so speech recognition takes a few seconds.
-* A full processing run takes ~105 s; the app also offers an instant path to the last processed result.
-* English and Hindi are verified end to end. Bangla and Arabic are wired through the same code path
-  and language selector but have not been reviewed by a speaker.
-* Single user, no accounts, no cloud sync — deliberately out of scope for a six-hour prototype.
-
-## 11. Future scope
-
-Live classroom streaming and incremental transcription · in-app capture · lecture history search ·
-per-student personalisation from past questions · richer LaTeX rendering · offline on-device
-inference for low-connectivity classrooms · many more languages with native-speaker review ·
-teacher-side analytics on which concepts students re-asked most.
-
-## 12. Third-party software
+## 14. Third-party software
 
 See [THIRD_PARTY.md](THIRD_PARTY.md). No third-party technology is claimed as original work.
 
-## 13. Requirements coverage
+## 15. Requirements coverage
 
-See [REQUIREMENTS_MATRIX.md](REQUIREMENTS_MATRIX.md) — every official requirement mapped to its
-implementation and the demo evidence for it.
+See [REQUIREMENTS_MATRIX.md](REQUIREMENTS_MATRIX.md) — every requirement mapped to its
+implementation and the evidence for it.

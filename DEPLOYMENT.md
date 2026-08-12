@@ -165,9 +165,10 @@ The QR points at the **page**, never at a versioned file, so a printed poster su
 
 ## 6. Secrets
 
-`backend/.env` (git-ignored) holds `GEMINI_API_KEY`, `BOB_API_BASE`, `BOB_API_KEY`, `BOB_MODEL`,
-`BOB_PROTOCOL`, `BOB_AUTH_STYLE`, `BOB_USER_AGENT` and `AUTH_SECRET`. With the tunnel deployment
-the process reads that file directly — nothing is uploaded anywhere.
+`backend/.env` (git-ignored) holds the BOB gateway settings (`BOB_API_BASE`, `BOB_API_KEY`,
+`BOB_MODEL`, `BOB_PROTOCOL`, `BOB_AUTH_STYLE`, `BOB_USER_AGENT`), the optional secondary-provider
+key, and `AUTH_SECRET`. `backend/.env.example` is the authoritative list of names and defaults. With
+the tunnel deployment the process reads that file directly — nothing is uploaded anywhere.
 
 `AUTH_SECRET` signs the classroom auth tokens. **Keep it stable**, or every signed-in user is
 logged out on the next restart.
@@ -233,7 +234,7 @@ cd android && ./gradlew installDebug
 
 | Limitation | Effect | Mitigation |
 |---|---|---|
-| **Ephemeral tunnel URL** | Restarting cloudflared invalidates the APK and QR | Keep it running; rebuild both if it restarts (§10) |
+| **Ephemeral tunnel URL** | Restarting cloudflared invalidates the APK and QR | Keep it running; rebuild both if it restarts (§11) |
 | **The laptop is the server** | It must stay awake and online | Mains power, sleep disabled |
 | Tunnel reconnects | Brief `530`s during a re-register | `--protocol http2` (§3) |
 | CPU-only Whisper | ~93 s per lecture | Pre-process demo content; the demo lecture is cached |
@@ -261,9 +262,9 @@ Device: `I2223`, **WiFi disabled, 5G mobile data only, `adb reverse --list` empt
 | QR payload | Decodes (zbar) to `<url>/download` |
 
 Full pipeline through the public backend: 8/8 stages `done` in **93 s** —
-`whisper:base` → `bob:premium` (board, visuals, understanding) → `bob:fast` (translation) →
-`bob:openai` (grounding). Live path: 4 chunks at **~11.5 s behind**, finish → 36 s / 9 segments →
-processed in 44 s → appears in My Lectures → BOB answers about it.
+`whisper:base` (speech) → `bob:premium` (board, visuals, understanding) → `bob:fast` (translation)
+→ BOB grounding. Live path: 4 chunks at **~11.5 s behind**, finish → 36 s / 9 segments → processed
+in 44 s → appears in My Lectures → BOB answers about it.
 
 ---
 

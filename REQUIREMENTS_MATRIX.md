@@ -31,9 +31,9 @@ it says so — nothing is marked complete unless it is demonstrable in the app o
 
 | # | Technique | Implementation | Demo evidence | Status |
 |---|---|---|---|---|
-| 11 | Speech recognition | OpenAI Whisper `base`, local CPU, ffmpeg-free WAV decoding | 70.2 s audio → 11 timestamped segments, 175 words | ✅ |
-| 12 | Large language model | IBM Bob `premium` (Claude Sonnet 4.5) for fusion and reasoning | Stage `lecture_understood · bob:premium`; 4 concepts, 4 formulas, 6 cross-modal links | ✅ |
-| 13 | Machine translation | IBM Bob `fast` with formula/term protection | Hindi notes; technical terms remain in English | ✅ |
+| 11 | Speech recognition | Whisper `base` (MIT, open source), local CPU, ffmpeg-free WAV decoding | 70.2 s audio → 11 timestamped segments, 175 words | ✅ |
+| 12 | Large language model | IBM BOB `premium` (vision-capable) for fusion and reasoning | Stage `lecture_understood · bob:premium`; 4 concepts, 4 formulas, 6 cross-modal links | ✅ |
+| 13 | Machine translation | IBM BOB `fast` with formula/term protection | Hindi notes; technical terms remain in English | ✅ |
 | 14 | OCR | Vision pass over the classroom image | Verbatim board text on the Visual screen | ✅ |
 | 15 | Computer vision | Vision model for semantics **plus** a genuine OpenCV Hough pass for shape structure | "OpenCV found 13 node shapes and 4 connectors" in the stage detail | ✅ |
 | 16 | BOB integration | IBM Bob is the reasoning engine for the whole pipeline, not just chat | `/health` → `"primary": "bob"`; every stage and chat message shows its engine badge | ✅ |
@@ -42,7 +42,7 @@ it says so — nothing is marked complete unless it is demonstrable in the app o
 
 | # | Requirement | Implementation | Demo evidence | Status |
 |---|---|---|---|---|
-| 17 | Lecture input | Preloaded demo lecture (audio + board image); `POST /api/lectures/upload` accepts audio + image | Setup screen; API docs at `/docs` | 🟡 in-app capture/record not implemented |
+| 17 | Lecture input | Preloaded demo lecture (audio + board image); `POST /api/lectures/upload` accepts video, audio and a board image | Setup screen; Upload Lecture screen; API docs at `/docs` | 🟡 in-app camera capture not implemented |
 | 18 | Preloaded demo content as reliability fallback | Bundled demo assets + cached processed result ("Open the last processed result") | Setup screen secondary button | ✅ |
 | 19 | Language selection | First-launch onboarding + language chip on Home + pills on Setup/Dashboard; choice persisted on device | Onboarding → Home shows हिन्दी chip; survives app restart | 🟡 en/hi verified; bn/ar offered as "preview", unverified by a speaker |
 | 20 | Timestamped transcript | `TranscriptSegment` rows with start/end; `MM:SS` timecodes | Dashboard → Teacher speech (expandable) | ✅ |
@@ -51,11 +51,11 @@ it says so — nothing is marked complete unless it is demonstrable in the app o
 | 23 | Source / evidence attribution | 4 source types (`speech`/`whiteboard`/`diagram`/`formula`) with refs, rendered as chips | BOB answer: `[formula Whiteboard, speech 00:59]`; concept sources `speech 00:05 … 00:26` | ✅ |
 | 24 | Native Android architecture | Compose, coroutines, ViewModel, repository-style API layer, OkHttp | `android/app/src/main/java/com/luminara/app/` | ✅ |
 | 25 | Python FastAPI backend | One service, no microservices | `backend/app/main.py` | ✅ |
-| 26 | SQLite persistence | Lecture, TranscriptSegment, VisualObservation, Formula, Note, QAExchange, StageEvent, Preference | `backend/data/luminara.db` | ✅ |
-| 27 | Screens 1–6 | Home, Lecture Setup, Processing, Dashboard, Visual Understanding, Ask BOB | All six navigable | ✅ |
+| 26 | SQLite persistence | User, SchoolClass, Membership, Lecture, TranscriptSegment, VisualObservation, Formula, Note, QAExchange, StageEvent, Preference | `backend/data/luminara.db` | ✅ |
+| 27 | Screens | Onboarding, Auth, Home, Classes, Class Detail, Upload Lecture, Lecture Setup, Processing, Lecture Detail, Live, Ask BOB | All eleven navigable | ✅ |
 | 28 | Meaningful processing stages, no fake progress | `stage_events` rows with real start/end times and engine names | Processing screen shows `11 ms`, `7.2 s`, `20.6 s`, `40.6 s`, `35.9 s` | ✅ |
 | 29 | Polished UI | Dark design system, typography scale, evidence chips, loading/empty/error states, subtle animation | Screenshots in `DEMO.md` | ✅ |
-| 30 | Offline / API-failure safety | 3-tier provider routing (Bob → Gemini → local); degraded engines labelled; retry paths | `FORCE_OFFLINE=1` run: pipeline still completes on Whisper + OpenCV + local engine | ✅ |
+| 30 | Offline / API-failure safety | 3-tier provider routing (BOB → optional secondary provider → local); degraded engines labelled; retry paths | `FORCE_OFFLINE=1` run: pipeline still completes on local speech recognition + OpenCV + local engine | ✅ |
 | 31 | No hardcoded secrets | `.env` (git-ignored) + `.env.example`; key never logged or returned | `.gitignore`, `backend/.env.example` | ✅ |
 | 32 | Third-party acknowledgement | `THIRD_PARTY.md` | — | ✅ |
 | 33 | Documentation set | README, SETUP, ARCHITECTURE, DEMO, THIRD_PARTY, REQUIREMENTS_MATRIX | Repository root | ✅ |
@@ -69,9 +69,9 @@ it says so — nothing is marked complete unless it is demonstrable in the app o
 | 36 | First-time language onboarding | `OnboardingScreen.kt`; four languages shown in their own script with a sample line | Fresh install → welcome screen → "Start learning" | ✅ |
 | 37 | Persistent preferred language | `Prefs.kt` (SharedPreferences); read before the first frame, so it works offline | Relaunch skips onboarding; Home shows the chosen language chip | ✅ |
 | 38 | Change language at any time | Language chip on Home opens a picker; Dashboard keeps its pills | Home chip → picker → applies immediately | ✅ |
-| 39 | Home organised around the four entry points | Hero demo lecture, Live Lecture tile, Ask BOB tile, My Lectures library | Home screen | 🟡 Live Lecture is labelled "Coming next" until P2 |
+| 39 | Home organised around the four entry points | Hero demo lecture, Live Lecture tile, Ask BOB tile, My Lectures library (plus My Classes once signed in) | Home screen | ✅ |
 | 40 | Premium product presentation | Greeting header, gradient hero, equal-height tiles, status/engine chips, empty states | Onboarding + Home screenshots | ✅ |
-| 41 | Zero-config backend discovery | App probes `10.0.2.2` (emulator) then `127.0.0.1` (`adb reverse` over USB) and persists what answers | Physical device connected by USB found the backend with no setup | ✅ |
+| 41 | Zero-config backend discovery | **Debug builds** probe `10.0.2.2` (emulator) then `127.0.0.1` (`adb reverse` over USB) and persist what answers. Release builds use the compiled public URL and have discovery compiled out (see row 82) | Physical device connected by USB found the backend with no setup | ✅ |
 
 ## P1 — mentor features
 
@@ -170,9 +170,10 @@ with ≥2 GB RAM — see DEPLOYMENT.md §2 and §7.
 
 ## Verification notes
 
-* Timings are from an actual run on the build machine (Windows 11, CPU-only Whisper). Full pipeline
-  ≈ 105 s; re-opening a processed lecture is instant.
-* The IBM Bob endpoint, auth scheme (`Authorization: apikey`), region lock and model catalogue were
+* Timings are from actual runs, not estimates: **≈ 105 s** on the build machine (Windows 11, CPU-only
+  speech recognition) and **93 s** through the deployed backend. Re-opening a processed lecture is
+  instant.
+* The IBM BOB endpoint, auth scheme (`Authorization: apikey`), region lock and model catalogue were
   each confirmed against the live service — see ARCHITECTURE.md §6.
 * The demo lecture's narration (Windows SAPI) and whiteboard (Pillow-rendered) are generated
   **inputs**. All pipeline **outputs** are produced at run time.
