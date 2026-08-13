@@ -102,5 +102,13 @@ dependencies {
 
     implementation("io.coil-kt:coil-compose:2.6.0")
 
+    // Live Class: board capture. camera-view gives the PreviewView, camera-lifecycle
+    // binds it to the composable's lifecycle so the camera is released with the screen.
+    val cameraX = "1.3.4"
+    implementation("androidx.camera:camera-core:$cameraX")
+    implementation("androidx.camera:camera-camera2:$cameraX")
+    implementation("androidx.camera:camera-lifecycle:$cameraX")
+    implementation("androidx.camera:camera-view:$cameraX")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

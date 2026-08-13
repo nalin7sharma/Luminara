@@ -85,6 +85,9 @@ import com.luminara.app.ui.theme.VioletSoft
 import com.luminara.app.viewmodel.UiState
 import java.util.Calendar
 
+/** Shared height for the primary action row, so its tiles line up exactly. */
+private val PRIMARY_TILE_HEIGHT = 146.dp
+
 @Composable
 fun HomeScreen(
     state: UiState,
@@ -118,25 +121,36 @@ fun HomeScreen(
                 item { ErrorBanner("Backend unreachable — $message", onRetry = onRefresh) }
             }
 
-            if (teacher) {
-                item {
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        ActionTile(
-                            icon = Icons.Filled.Groups,
-                            title = "Create class",
-                            tint = Teal,
-                            modifier = Modifier.weight(1f),
-                            enabled = state.signedIn,
-                            onClick = onClasses,
-                        )
+            // One row of primary actions, and what it offers depends on who you
+            // are. "Create class" is deliberately not here: the My Classes
+            // section below already carries that action, and two entry points
+            // for one job is what made this screen feel crowded.
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    LiveLectureTile(
+                        enabled = state.connectionError == null,
+                        teacher = teacher,
+                        modifier = Modifier.weight(1f),
+                        onClick = onLiveLecture,
+                    )
+                    if (teacher) {
                         ActionTile(
                             icon = Icons.Filled.CloudUpload,
                             title = "Upload lecture",
+                            subtitle = if (state.signedIn) "Video, audio or a board photo"
+                            else "Sign in to upload",
                             tint = Amber,
-                            modifier = Modifier.weight(1f),
+                            // Matches the live tile so the row reads as one pair.
+                            modifier = Modifier.weight(1f).height(PRIMARY_TILE_HEIGHT),
                             enabled = state.signedIn,
                             onClick = onUploadLecture,
                         )
+                    } else {
+                        AskBobTile(
+                            enabled = lectures.isNotEmpty(),
+                            lectureCount = lectures.size,
+                            modifier = Modifier.weight(1f),
+                        ) { lectures.firstOrNull()?.let { onAskBob(it.id) } }
                     }
                 }
             }
@@ -144,21 +158,6 @@ fun HomeScreen(
             item { ClassesSection(state, onClasses, onOpenClass, onSignIn) }
 
             item { DemoHeroCard(onStartLecture) }
-
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    LiveLectureTile(
-                        enabled = state.connectionError == null,
-                        modifier = Modifier.weight(1f),
-                        onClick = onLiveLecture,
-                    )
-                    AskBobTile(
-                        enabled = lectures.isNotEmpty(),
-                        lectureCount = lectures.size,
-                        modifier = Modifier.weight(1f),
-                    ) { lectures.firstOrNull()?.let { onAskBob(it.id) } }
-                }
-            }
 
             item {
                 Spacer(Modifier.height(6.dp))
@@ -175,7 +174,7 @@ fun HomeScreen(
             }
 
             if (lectures.isEmpty()) {
-                item { EmptyLibrary() }
+                item { EmptyLibrary(teacher) }
             } else {
                 items(lectures) { lecture ->
                     LectureCard(lecture) { onOpenLecture(lecture.id) }
@@ -316,36 +315,44 @@ private fun StatusChip(state: UiState) {
 private fun ActionTile(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     title: String,
+    subtitle: String,
     tint: Color,
     enabled: Boolean,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    val shape = RoundedCornerShape(18.dp)
-    Row(
+    // Same shape, padding and text rhythm as the live and BOB tiles, so a row
+    // of primary actions reads as one set rather than three different widgets.
+    val shape = RoundedCornerShape(20.dp)
+    Column(
         modifier
-            .height(62.dp)
             .background(
-                if (enabled) tint.copy(alpha = 0.12f) else InkCard.copy(alpha = 0.45f),
+                if (enabled) tint.copy(alpha = 0.12f) else InkCard.copy(alpha = 0.5f),
                 shape,
             )
             .border(1.dp, if (enabled) tint.copy(alpha = 0.3f) else InkBorder, shape)
             .clickable(enabled = enabled) { onClick() }
-            .padding(horizontal = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(16.dp)
     ) {
         Icon(
             icon,
             null,
             tint = if (enabled) tint else TextFaint,
-            modifier = Modifier.size(19.dp),
+            modifier = Modifier.size(20.dp),
         )
-        Spacer(Modifier.width(10.dp))
+        Spacer(Modifier.weight(1f))
         Text(
             title,
-            style = MaterialTheme.typography.titleSmall,
-            color = if (enabled) MaterialTheme.colorScheme.onSurface else TextFaint,
-            fontSize = 13.5.sp,
+            style = MaterialTheme.typography.titleMedium,
+            color = if (enabled) MaterialTheme.colorScheme.onSurface else TextSecondary,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            subtitle,
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextFaint,
+            fontSize = 12.5.sp,
+            maxLines = 2,
         )
     }
 }
@@ -483,7 +490,7 @@ private fun DemoHeroCard(onStart: () -> Unit) {
             Icon(Icons.Filled.AutoAwesome, null, tint = VioletSoft, modifier = Modifier.size(17.dp))
             Spacer(Modifier.width(8.dp))
             Text(
-                "TODAY'S LECTURE",
+                "DEMO LECTURE",
                 style = MaterialTheme.typography.labelSmall,
                 color = VioletSoft,
                 letterSpacing = 1.6.sp,
@@ -516,7 +523,7 @@ private fun DemoHeroCard(onStart: () -> Unit) {
         ) {
             Icon(Icons.Filled.PlayArrow, null, modifier = Modifier.size(19.dp))
             Spacer(Modifier.width(8.dp))
-            Text("Start lecture", style = MaterialTheme.typography.labelLarge, fontSize = 16.sp)
+            Text("Try the demo", style = MaterialTheme.typography.labelLarge, fontSize = 16.sp)
         }
     }
 }
@@ -541,6 +548,7 @@ private fun Fact(value: String, label: String) {
 @Composable
 private fun LiveLectureTile(
     enabled: Boolean,
+    teacher: Boolean,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
@@ -554,7 +562,7 @@ private fun LiveLectureTile(
     val shape = RoundedCornerShape(20.dp)
     Column(
         modifier
-            .height(146.dp)
+            .height(PRIMARY_TILE_HEIGHT)
             .background(
                 if (enabled) Rose.copy(alpha = 0.12f) else InkCard.copy(alpha = 0.5f),
                 shape,
@@ -580,16 +588,16 @@ private fun LiveLectureTile(
         }
         Spacer(Modifier.weight(1f))
         Text(
-            "Live Lecture",
+            if (teacher) "Start live class" else "Live class",
             style = MaterialTheme.typography.titleMedium,
             color = if (enabled) MaterialTheme.colorScheme.onSurface else TextSecondary,
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            if (enabled) {
-                "Follow class in near real time"
-            } else {
-                "Needs the backend"
+            when {
+                !enabled -> "Needs the backend"
+                teacher -> "Record and read the board"
+                else -> "Follow class in near real time"
             },
             style = MaterialTheme.typography.bodyMedium,
             color = TextFaint,
@@ -609,7 +617,7 @@ private fun AskBobTile(
     val shape = RoundedCornerShape(20.dp)
     Column(
         modifier
-            .height(146.dp)
+            .height(PRIMARY_TILE_HEIGHT)
             .background(
                 if (enabled) Violet.copy(alpha = 0.16f) else InkCard.copy(alpha = 0.5f),
                 shape,
@@ -632,8 +640,10 @@ private fun AskBobTile(
         )
         Spacer(Modifier.height(4.dp))
         Text(
+            // Say which lecture the tap opens. "N lectures ready to ask about"
+            // implied a picker and then opened the newest one.
             if (enabled) {
-                "$lectureCount ${if (lectureCount == 1) "lecture" else "lectures"} ready to ask about"
+                "Your latest lecture · $lectureCount saved"
             } else {
                 "Process a lecture first"
             },
@@ -646,7 +656,7 @@ private fun AskBobTile(
 }
 
 @Composable
-private fun EmptyLibrary() {
+private fun EmptyLibrary(teacher: Boolean) {
     val shape = RoundedCornerShape(20.dp)
     Column(
         Modifier
@@ -665,7 +675,11 @@ private fun EmptyLibrary() {
         )
         Spacer(Modifier.height(5.dp))
         Text(
-            "Process the demo lecture above and it will be saved here for you to revisit.",
+            if (teacher) {
+                "Upload a lecture, or start a live class — it will be saved here once processed."
+            } else {
+                "Open the demo lecture above and it will be saved here for you to revisit."
+            },
             style = MaterialTheme.typography.bodyMedium,
             color = TextFaint,
             fontSize = 13.sp,

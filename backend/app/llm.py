@@ -80,11 +80,30 @@ def parse_json_loose(text: str, default=None):
     return default
 
 
+def sniff_image_mime(raw: bytes, suffix: str = "") -> str:
+    """Mime type from the bytes, not the file name.
+
+    A camera frame arrives as whatever the device encoded, and the extension we
+    happened to save it under proves nothing. Declaring `image/jpeg` over PNG
+    bytes makes the gateway reject the request outright, which shows up as a
+    vision failure rather than as the encoding mistake it is.
+    """
+    if raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if raw.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if raw.startswith(b"RIFF") and raw[8:12] == b"WEBP":
+        return "image/webp"
+    if raw.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    return "image/png" if suffix.lower() == ".png" else "image/jpeg"
+
+
 def image_part(path: str | Path) -> dict:
     p = Path(path)
-    mime = "image/png" if p.suffix.lower() == ".png" else "image/jpeg"
-    data = base64.b64encode(p.read_bytes()).decode("ascii")
-    return {"inline_data": {"mime_type": mime, "data": data}}
+    raw = p.read_bytes()
+    data = base64.b64encode(raw).decode("ascii")
+    return {"inline_data": {"mime_type": sniff_image_mime(raw, p.suffix), "data": data}}
 
 
 class GeminiClient:

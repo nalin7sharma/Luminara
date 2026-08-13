@@ -136,9 +136,17 @@ recording.
 > promise — a nine-second chunk cannot be transcribed until it has been spoken. This is near real
 > time, and we say so."
 
-Press **End lecture**:
+Now turn on the camera and point it at the board, then tap **Capture Board**:
 
-> "And now it's just… a lecture. Same notes, same script, same BOB, sitting in My Lectures next to
+> "That frame goes through the same vision pass the recorded lecture uses, and it lands on the
+> timeline at the moment it was taken — `00:54 — Chart: Grand Finale Schedule Table`. Notice the
+> transcript never stopped: audio and vision run independently, so reading the board does not pause
+> the class."
+
+Press **End class**:
+
+> "And now it's just… a lecture. The board captures were merged into the same fusion an uploaded
+> lecture gets — same notes, same script, same formulas, same BOB — sitting in My Lectures next to
 > the recorded ones."
 
 **If the room is quiet or the mic is blocked**, show that too — it says *"Nothing to save — no

@@ -107,8 +107,25 @@ labelled as a frame rather than a photograph.
 
 **Live** — the phone records the class and posts **9-second chunks** to the same local speech
 recognition and the same translation path. The screen shows the original, the translation and the
-current delay. **End lecture** hands the accumulated transcript to the identical reasoning step, so
-a live session becomes an ordinary lecture with notes, script, agent and study pack.
+current delay. **End class** hands the accumulated transcript to the identical reasoning step, so a
+live session becomes an ordinary lecture with notes, script, agent and study pack.
+
+Live Class is multimodal too. An optional camera preview sits above the transcript, and
+**Capture Board** photographs the board and runs it through the *existing* vision pass, pinning the
+result to the moment of the class it was taken:
+
+```
+00:54 — Chart: Grand Finale Schedule Table
+```
+
+Captures land on the same timeline as the speech, can be sampled automatically every 12 seconds, and
+are merged into one vision result at the end — so a live lecture reaches fusion with exactly the
+shape an uploaded lecture has. **BOB can also be asked questions during the class**, answering only
+from what has been captured so far. No video is ever recorded or streamed: one frame, on request.
+
+Reliability is per-modality. A camera failure surfaces on the capture, not the lecture; a vision
+failure leaves the transcript intact; a translation failure leaves the original text; and audio
+keeps being captured and uploaded while a frame is being read.
 
 This is deliberately called **near real time, not real time.** A 9-second chunk cannot be
 transcribed before it has been spoken, so the student is always at least one chunk behind, plus

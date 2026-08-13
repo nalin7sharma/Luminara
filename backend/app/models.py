@@ -161,6 +161,9 @@ class Lecture(Base, JsonMixin):
     stages: Mapped[list["StageEvent"]] = relationship(
         back_populates="lecture", cascade="all, delete-orphan", order_by="StageEvent.ordinal"
     )
+    board_captures: Mapped[list["BoardCapture"]] = relationship(
+        back_populates="lecture", cascade="all, delete-orphan", order_by="BoardCapture.at_seconds"
+    )
 
     @property
     def knowledge(self) -> dict:
@@ -295,6 +298,54 @@ class StageEvent(Base):
         if end.tzinfo is None:
             end = end.replace(tzinfo=timezone.utc)
         return max(0, int((end - start).total_seconds() * 1000))
+
+
+class BoardCapture(Base, JsonMixin):
+    """One frame of the board, read during a live class.
+
+    This is the live-time record: the frame, when in the lecture it was taken,
+    and what the vision pass found in it. At finish these are merged into a
+    single VisionResult and handed to the ordinary fusion stage, so a live
+    lecture with board captures ends up with the same LectureKnowledge shape as
+    an uploaded lecture with a board photograph.
+    """
+
+    __tablename__ = "board_captures"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    lecture_id: Mapped[str] = mapped_column(ForeignKey("lectures.id", ondelete="CASCADE"))
+    at_seconds: Mapped[float] = mapped_column(Float, default=0.0)
+    image_path: Mapped[str] = mapped_column(Text, default="")
+    # "Formula: T(n) = T(n/2) + O(1)" -- what the app shows on the timeline.
+    headline: Mapped[str] = mapped_column(String(300), default="")
+    board_text: Mapped[str] = mapped_column(Text, default="")
+    observations_json: Mapped[str] = mapped_column(Text, default="")
+    formulas_json: Mapped[str] = mapped_column(Text, default="")
+    terms_json: Mapped[str] = mapped_column(Text, default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    engine: Mapped[str] = mapped_column(String(64), default="")
+    error: Mapped[str] = mapped_column(Text, default="")
+    # True when the periodic sampler took it rather than the student tapping.
+    auto: Mapped[bool] = mapped_column(Boolean, default=False)
+    # A capture that found nothing is kept (it is honest evidence that the board
+    # was empty) but never becomes the lecture thumbnail.
+    useful: Mapped[bool] = mapped_column(Boolean, default=False)
+    ms: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    lecture: Mapped[Lecture] = relationship(back_populates="board_captures")
+
+    @property
+    def observation_list(self) -> list[dict]:
+        return self.loads(self.observations_json, [])
+
+    @property
+    def formula_list(self) -> list[dict]:
+        return self.loads(self.formulas_json, [])
+
+    @property
+    def term_list(self) -> list[dict]:
+        return self.loads(self.terms_json, [])
 
 
 class Preference(Base):

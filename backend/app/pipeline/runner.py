@@ -22,6 +22,7 @@ from ..db import session_scope
 from ..llm import llm
 from ..models import Formula, Lecture, Note, StageEvent, TranscriptSegment, VisualObservation
 from . import asr, notes as notes_mod, translate as translate_mod, understanding, vision
+from .script import timecode
 
 log = logging.getLogger("luminara.runner")
 
@@ -192,16 +193,7 @@ def _run(lecture_id: str) -> None:
             if vres.ok:
                 chars = len(vres.board_text)
                 lines = len([x for x in vres.board_text.splitlines() if x.strip()])
-                db.add(
-                    VisualObservation(
-                        lecture_id=lecture_id,
-                        kind="board_text",
-                        title="Board text (OCR)",
-                        description="Verbatim text read from the classroom board.",
-                        extracted_text=vres.board_text,
-                        source_ref="Whiteboard",
-                    )
-                )
+                persist_board_text(db, lecture_id, vres)
                 db.commit()
                 end_stage(
                     db,
@@ -228,30 +220,7 @@ def _run(lecture_id: str) -> None:
                 else "local shape pass unavailable"
             )
             if vres.ok:
-                import json as _json
-
-                for o in vres.observations:
-                    db.add(
-                        VisualObservation(
-                            lecture_id=lecture_id,
-                            kind=o.get("kind", "diagram"),
-                            title=o.get("title", ""),
-                            description=o.get("description", ""),
-                            extracted_text=o.get("extracted_text", ""),
-                            relationships_json=_json.dumps(o.get("relationships", [])),
-                            source_ref=o.get("source_ref", "Whiteboard"),
-                        )
-                    )
-                for f in vres.formulas:
-                    db.add(
-                        Formula(
-                            lecture_id=lecture_id,
-                            latex=f.get("latex", ""),
-                            plain=f.get("plain", ""),
-                            meaning=f.get("meaning", ""),
-                            source_ref=f.get("source_ref", "Whiteboard"),
-                        )
-                    )
+                persist_visuals(db, lecture_id, vres)
                 db.commit()
                 end_stage(
                     db,
@@ -455,14 +424,42 @@ def finalize_live(lecture_id: str) -> None:
                 detail="no speech was recognised in this session",
             )
 
-        for key in ("board_text_extracted", "visuals_analyzed"):
+        # Board captures taken during the class are the live equivalent of the
+        # uploaded board photograph. They were already read by the vision pass
+        # while the class was happening, so record that work as done rather than
+        # re-running it, and merge it into one VisionResult for fusion.
+        captures = [c for c in lec.board_captures if c.useful]
+        vres = _merge_board_captures(captures)
+        if captures:
+            engines = sorted({c.engine for c in captures if c.engine}) or ["none"]
+            lines = len([ln for ln in vres.board_text.splitlines() if ln.strip()])
+            persist_board_text(db, lecture_id, vres)
+            persist_visuals(db, lecture_id, vres)
+            db.commit()
             end_stage(
                 db,
                 lecture_id,
-                key,
-                status="skipped",
-                detail="no classroom image was captured in this live session",
+                "board_text_extracted",
+                detail=f"{len(captures)} board capture(s) read live, {lines} lines of text",
+                engine=engines[0],
             )
+            end_stage(
+                db,
+                lecture_id,
+                "visuals_analyzed",
+                detail=f"{len(vres.observations)} visual element(s), "
+                f"{len(vres.formulas)} formula(s) captured across the class",
+                engine=engines[0],
+            )
+        else:
+            skipped = len(lec.board_captures)
+            reason = (
+                "no classroom image was captured in this live session"
+                if skipped == 0
+                else f"{skipped} board capture(s) found nothing readable"
+            )
+            for key in ("board_text_extracted", "visuals_analyzed"):
+                end_stage(db, lecture_id, key, status="skipped", detail=reason)
 
         transcript = asr.Transcript(
             segments=[asr.Segment(s.start, s.end, s.text) for s in segments],
@@ -471,9 +468,6 @@ def finalize_live(lecture_id: str) -> None:
             engine=f"whisper:{settings.whisper_model}",
             ok=bool(segments),
             error="" if segments else "no speech recognised",
-        )
-        vres = vision.VisionResult(
-            ok=False, engine="none", error="live session had no classroom image"
         )
 
         if not segments:
@@ -485,6 +479,114 @@ def finalize_live(lecture_id: str) -> None:
             return
 
         _reason_and_publish(db, lec, transcript, vres)
+
+
+def persist_board_text(db, lecture_id: str, vres) -> None:
+    """Store the verbatim board text as an observation row."""
+    text = (vres.board_text or "").strip()
+    if not text:
+        return
+    db.add(
+        VisualObservation(
+            lecture_id=lecture_id,
+            kind="board_text",
+            title="Board text (OCR)",
+            description="Verbatim text read from the classroom board.",
+            extracted_text=vres.board_text,
+            source_ref="Whiteboard",
+        )
+    )
+
+
+def persist_visuals(db, lecture_id: str, vres) -> None:
+    """Store diagram observations and formulas.
+
+    Shared by the recorded pipeline and the live finalise step. A live class
+    that captured its board must end up with the same rows an uploaded lecture
+    would, or the Visuals and Formulas tabs — and the study pack — would be
+    empty for it while the knowledge document quietly contained the evidence.
+    """
+    for o in vres.observations:
+        db.add(
+            VisualObservation(
+                lecture_id=lecture_id,
+                kind=o.get("kind", "diagram"),
+                title=o.get("title", ""),
+                description=o.get("description", ""),
+                extracted_text=o.get("extracted_text", ""),
+                relationships_json=_dumps(o.get("relationships", [])),
+                source_ref=o.get("source_ref", "Whiteboard"),
+            )
+        )
+    for f in vres.formulas:
+        db.add(
+            Formula(
+                lecture_id=lecture_id,
+                latex=f.get("latex", ""),
+                plain=f.get("plain", ""),
+                meaning=f.get("meaning", ""),
+                source_ref=f.get("source_ref", "Whiteboard"),
+            )
+        )
+
+
+def _merge_board_captures(captures: list) -> vision.VisionResult:
+    """Fold every board capture from a live class into one VisionResult.
+
+    Fusion takes a single vision result, and this keeps that contract: the live
+    path hands it the same shape the recorded path does. Board text is labelled
+    with the moment it was captured, and each formula and observation keeps its
+    own timecoded `source_ref`, so the resulting citations point at when the
+    thing appeared on the board rather than at the class as a whole.
+    """
+    if not captures:
+        return vision.VisionResult(
+            ok=False, engine="none", error="live session had no classroom image"
+        )
+
+    board_text: list[str] = []
+    observations: list[dict] = []
+    formulas: list[dict] = []
+    terms: list[dict] = []
+    summaries: list[str] = []
+    seen_formula: set[str] = set()
+    seen_term: set[str] = set()
+
+    for capture in sorted(captures, key=lambda c: c.at_seconds):
+        stamp = timecode(capture.at_seconds)
+        ref = f"Whiteboard · {stamp}"
+        if (capture.board_text or "").strip():
+            board_text.append(f"[{stamp}]\n{capture.board_text.strip()}")
+        for obs in capture.observation_list:
+            observations.append({**obs, "source_ref": ref, "at_seconds": capture.at_seconds})
+        for formula in capture.formula_list:
+            key = (formula.get("plain") or formula.get("latex") or "").strip()
+            if key and key in seen_formula:
+                continue          # the same formula photographed twice is one formula
+            if key:
+                seen_formula.add(key)
+            formulas.append({**formula, "source_ref": ref, "at_seconds": capture.at_seconds})
+        for term in capture.term_list:
+            key = (term.get("term") or "").strip().lower()
+            if key and key in seen_term:
+                continue
+            if key:
+                seen_term.add(key)
+            terms.append(term)
+        if (capture.summary or "").strip():
+            summaries.append(capture.summary.strip())
+
+    engines = [c.engine for c in captures if c.engine]
+    return vision.VisionResult(
+        ok=True,
+        engine=engines[0] if engines else "none",
+        board_text="\n\n".join(board_text),
+        observations=observations,
+        formulas=formulas,
+        technical_terms=terms,
+        summary=" ".join(summaries)[:1200],
+        geometry={},
+    )
 
 
 def start_finalize(lecture_id: str) -> None:

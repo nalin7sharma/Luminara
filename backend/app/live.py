@@ -25,13 +25,16 @@ import wave
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from .agents import bob as bob_agent
 from .config import UPLOAD_DIR, settings
 from .db import get_db
-from .models import Lecture, TranscriptSegment
-from .pipeline import asr, runner
+from .llm import sniff_image_mime
+from .models import BoardCapture, Lecture, TranscriptSegment
+from .pipeline import asr, runner, vision
 from .pipeline import translate as translate_mod
 from .pipeline.script import timecode
 
@@ -42,6 +45,11 @@ router = APIRouter(prefix="/api/live", tags=["live"])
 # What the client should record before posting. Long enough that Whisper has
 # real context to work with, short enough that the student is not badly behind.
 CHUNK_SECONDS = 9
+
+# How often the app may sample a frame on its own. Long enough that a class is
+# not uploading constantly, short enough to catch a board that changed. A
+# student tapping Capture Board always takes priority over the sampler.
+AUTO_CAPTURE_SECONDS = 12
 
 
 # Below this peak amplitude a chunk is room tone, not a lecture.
@@ -110,13 +118,18 @@ def start_live(req: StartRequest, db: Session = Depends(get_db)) -> dict:
 
 
 @router.post("/chunk")
-async def live_chunk(
+def live_chunk(
     lecture_id: str = Form(...),
     chunk_index: int = Form(0),
     audio: UploadFile = File(...),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Transcribe one chunk and translate it. Never raises on a bad chunk."""
+    """Transcribe one chunk and translate it. Never raises on a bad chunk.
+
+    Sync on purpose. Transcription and translation are blocking calls; running
+    them in FastAPI's threadpool rather than on the event loop keeps a board
+    capture (or any other request) from queueing behind them.
+    """
     lec = db.get(Lecture, lecture_id)
     if lec is None:
         raise HTTPException(404, "live lecture not found")
@@ -128,8 +141,7 @@ async def live_chunk(
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"chunk-{chunk_index:04d}.wav"
 
-    payload = await audio.read()
-    path.write_bytes(payload)
+    path.write_bytes(audio.file.read())
 
     # The offset of this chunk inside the lecture is however much audio we have
     # already accepted — robust to chunks that are not exactly CHUNK_SECONDS.
@@ -253,6 +265,279 @@ async def live_chunk(
     }
 
 
+# ---------------------------------------------------------------------------
+# board capture
+# ---------------------------------------------------------------------------
+
+_KIND_LABELS = {
+    "board text": "Board",
+    "text": "Board",
+    "diagram": "Diagram",
+    "tree": "Diagram",
+    "graph": "Graph",
+    "chart": "Chart",
+    "bar chart": "Chart",
+    "table": "Table",
+    "equation": "Formula",
+    "formula": "Formula",
+    "illustration": "Figure",
+    "screenshot": "Figure",
+}
+
+
+# A capture is only worth showing if the vision pass actually found something.
+def _headline(res: vision.VisionResult) -> tuple[str, bool]:
+    """One line for the timeline, and whether the frame was worth keeping."""
+    formulas = [f for f in res.formulas if (f.get("plain") or f.get("latex"))]
+    if formulas:
+        first = formulas[0]
+        return f"Formula: {first.get('plain') or first.get('latex')}", True
+
+    diagrams = [o for o in res.observations if (o.get("title") or o.get("description"))]
+    if diagrams:
+        first = diagrams[0]
+        # The model's `kind` is a slug ("board_text", "bar_chart"); the student
+        # should read a label, not an identifier.
+        raw = (first.get("kind") or "diagram").replace("_", " ").strip()
+        kind = _KIND_LABELS.get(raw.lower(), raw.title())
+        return f"{kind}: {first.get('title') or first.get('description', '')[:60]}", True
+
+    text = (res.board_text or "").strip()
+    if text:
+        lines = [ln for ln in text.splitlines() if ln.strip()]
+        head = lines[0][:60] if lines else ""
+        return f"Board text: {head}" if head else f"Board text: {len(lines)} lines", True
+
+    return "Nothing readable on the board", False
+
+
+@router.post("/board")
+def live_board(
+    lecture_id: str = Form(...),
+    at_seconds: float = Form(-1.0),
+    auto: bool = Form(False),
+    image: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Read one frame of the board and pin it to the lecture's timeline.
+
+    Deliberately a *sync* endpoint: FastAPI runs it in the threadpool, so the
+    vision call never stalls the audio chunks arriving on the event loop. A
+    failure here returns a described failure, never an exception — losing the
+    camera must not end the class.
+    """
+    lec = db.get(Lecture, lecture_id)
+    if lec is None:
+        raise HTTPException(404, "live lecture not found")
+    if lec.status not in ("live", "paused"):
+        raise HTTPException(409, f"this lecture is {lec.status}, not recording")
+
+    started = time.time()
+    # Default to "now" in lecture time: however much audio we have accepted.
+    at = float(lec.duration_sec or 0.0) if at_seconds < 0 else float(at_seconds)
+
+    folder = UPLOAD_DIR / lecture_id
+    folder.mkdir(parents=True, exist_ok=True)
+    index = len(lec.board_captures)
+    raw = image.file.read()
+    # Store the frame under its real type; the vision transport declares the
+    # mime from the bytes, and a mismatch is rejected by the gateway.
+    mime = sniff_image_mime(raw, Path(image.filename or "").suffix)
+    path = folder / f"board-{index:03d}.{mime.rsplit('/', 1)[-1].replace('jpeg', 'jpg')}"
+    path.write_bytes(raw)
+
+    try:
+        res = vision.analyze(path)
+    except Exception as exc:                       # never kill the class
+        log.warning("board capture failed for %s: %s", lecture_id, exc)
+        res = vision.VisionResult(ok=False, engine="none", error=str(exc)[:200])
+
+    headline, useful = _headline(res)
+    capture = BoardCapture(
+        lecture_id=lecture_id,
+        at_seconds=at,
+        image_path=str(path),
+        headline=headline if res.ok else "Board could not be read",
+        board_text=res.board_text,
+        observations_json=runner._dumps(res.observations),
+        formulas_json=runner._dumps(res.formulas),
+        terms_json=runner._dumps(res.technical_terms),
+        summary=res.summary,
+        engine=res.engine,
+        error=res.error,
+        auto=bool(auto),
+        useful=bool(res.ok and useful),
+        ms=int((time.time() - started) * 1000),
+    )
+    db.add(capture)
+
+    # The most recent *useful* capture becomes the lecture's board image, so the
+    # card thumbnail and /image endpoint work exactly as they do for an upload.
+    if capture.useful:
+        lec.image_path = str(path)
+    db.commit()
+
+    return {
+        "ok": bool(res.ok),
+        "capture_id": capture.id,
+        "timecode": timecode(at),
+        "at_seconds": round(at, 2),
+        "headline": capture.headline,
+        "useful": capture.useful,
+        "auto": capture.auto,
+        "board_text": res.board_text,
+        "text_lines": len([ln for ln in (res.board_text or "").splitlines() if ln.strip()]),
+        "formulas": res.formulas,
+        "observations": res.observations,
+        "summary": res.summary,
+        "engine": res.engine,
+        "ms": capture.ms,
+        "error": res.error,
+    }
+
+
+@router.get("/{lecture_id}/timeline")
+def live_timeline(lecture_id: str, db: Session = Depends(get_db)) -> dict:
+    """Speech and board moments on one axis, in the app's source vocabulary."""
+    lec = db.get(Lecture, lecture_id)
+    if lec is None:
+        raise HTTPException(404, "live lecture not found")
+
+    events: list[dict] = [
+        {
+            "kind": "speech",
+            "at": round(s.start, 2),
+            "timecode": timecode(s.start),
+            "text": s.text,
+            "source": "speech",
+        }
+        for s in lec.segments
+    ]
+    events += [
+        {
+            "kind": "board",
+            "at": round(c.at_seconds, 2),
+            "timecode": timecode(c.at_seconds),
+            "text": c.headline,
+            "source": "whiteboard",
+            "capture_id": c.id,
+            "useful": c.useful,
+            "auto": c.auto,
+            "formulas": c.formula_list,
+            "engine": c.engine,
+        }
+        for c in lec.board_captures
+    ]
+    events.sort(key=lambda e: (e["at"], 0 if e["kind"] == "speech" else 1))
+    return {
+        "lecture_id": lec.id,
+        "status": lec.status,
+        "duration_sec": round(lec.duration_sec, 1),
+        "board_captures": len(lec.board_captures),
+        "events": events,
+    }
+
+
+@router.get("/{lecture_id}/capture/{capture_id}")
+def live_capture_image(lecture_id: str, capture_id: int, db: Session = Depends(get_db)):
+    capture = db.get(BoardCapture, capture_id)
+    if capture is None or capture.lecture_id != lecture_id:
+        raise HTTPException(404, "capture not found")
+    path = Path(capture.image_path)
+    if not path.exists():
+        raise HTTPException(404, "capture image is no longer on disk")
+    return FileResponse(path, media_type="image/png" if path.suffix == ".png" else "image/jpeg")
+
+
+# ---------------------------------------------------------------------------
+# live BOB — answers from the class so far
+# ---------------------------------------------------------------------------
+
+
+class LiveAskRequest(BaseModel):
+    question: str
+    language: str = ""
+
+
+def partial_knowledge(lec: Lecture) -> dict:
+    """A LectureKnowledge-shaped view of a class that is still happening.
+
+    Nothing is invented: it is the transcript recognised so far plus whatever
+    the board captures found. Because the shape matches, the ordinary agent
+    answers over it unchanged — and its citations still point at real moments.
+    """
+    segments = sorted(lec.segments, key=lambda s: s.start)
+    captures = [c for c in lec.board_captures if c.useful]
+
+    formulas: list[dict] = []
+    observations: list[dict] = []
+    terms: list[dict] = []
+    board_text: list[str] = []
+    for capture in captures:
+        ref = f"Whiteboard · {timecode(capture.at_seconds)}"
+        for f in capture.formula_list:
+            formulas.append({**f, "source_ref": ref})
+        for o in capture.observation_list:
+            observations.append({**o, "source_ref": ref})
+        terms += capture.term_list
+        if capture.board_text.strip():
+            board_text.append(f"[{timecode(capture.at_seconds)}]\n{capture.board_text.strip()}")
+
+    return {
+        "title": lec.title or "Live lecture",
+        "topic": lec.course or "",
+        "summary": "",
+        "key_concepts": [],
+        "important_points": [],
+        "technical_terms": terms,
+        "formulas": formulas,
+        "visual_explanations": [],
+        "visual_observations": observations,
+        "modality_links": [],
+        "board_text": "\n\n".join(board_text),
+        "simple_explanation": "",
+        "transcript": [{"start": s.start, "end": s.end, "text": s.text} for s in segments],
+        "engines": {"asr": f"whisper:{settings.whisper_model}"},
+        "live_partial": True,
+    }
+
+
+@router.post("/{lecture_id}/ask")
+def live_ask(lecture_id: str, req: LiveAskRequest, db: Session = Depends(get_db)) -> dict:
+    """Ask about the class while it is still running."""
+    lec = db.get(Lecture, lecture_id)
+    if lec is None:
+        raise HTTPException(404, "live lecture not found")
+
+    question = (req.question or "").strip()
+    if not question:
+        raise HTTPException(400, "question is empty")
+
+    knowledge = partial_knowledge(lec)
+    if not knowledge["transcript"] and not knowledge["formulas"]:
+        return {
+            "answer": "Nothing has been captured yet — no speech has been recognised and the "
+            "board has not been read. Ask again once the class is under way.",
+            "grounded": False,
+            "sources": [],
+            "engine": "none",
+            "live_partial": True,
+            "spoken_seconds": round(lec.duration_sec, 1),
+            "board_captures": 0,
+        }
+
+    result = bob_agent.ask(
+        knowledge,
+        question,
+        language=req.language or lec.language or "en",
+        history=[],
+    )
+    result["live_partial"] = True
+    result["spoken_seconds"] = round(lec.duration_sec, 1)
+    result["board_captures"] = len([c for c in lec.board_captures if c.useful])
+    return result
+
+
 @router.post("/pause")
 def pause_live(req: FinishRequest, db: Session = Depends(get_db)) -> dict:
     lec = db.get(Lecture, req.lecture_id)
@@ -278,6 +563,18 @@ def live_state(lecture_id: str, db: Session = Depends(get_db)) -> dict:
         "segments": [
             {"timecode": timecode(s.start), "start": s.start, "text": s.text}
             for s in sorted(lec.segments, key=lambda s: s.start)
+        ],
+        "board_captures": [
+            {
+                "capture_id": c.id,
+                "timecode": timecode(c.at_seconds),
+                "at_seconds": round(c.at_seconds, 2),
+                "headline": c.headline,
+                "useful": c.useful,
+                "auto": c.auto,
+                "engine": c.engine,
+            }
+            for c in lec.board_captures
         ],
     }
 
@@ -314,6 +611,31 @@ def finish_live(req: FinishRequest, db: Session = Depends(get_db)) -> dict:
     }
 
 
+@router.post("/discard")
+def discard_live(req: FinishRequest, db: Session = Depends(get_db)) -> dict:
+    """Throw away a session the student walked out of.
+
+    Without this every screen re-entry leaves a `live` row behind, and those
+    orphans are indistinguishable from a class in progress. A session that
+    recognised speech is kept — the student may want to finish it — so only an
+    empty one is deleted.
+    """
+    lec = db.get(Lecture, req.lecture_id)
+    if lec is None:
+        return {"lecture_id": req.lecture_id, "discarded": False, "reason": "already gone"}
+    if lec.status not in ("live", "paused"):
+        return {"lecture_id": lec.id, "discarded": False, "reason": f"status is {lec.status}"}
+    if lec.segments:
+        lec.status = "abandoned"
+        db.commit()
+        return {"lecture_id": lec.id, "discarded": False, "reason": "kept: it has speech"}
+
+    db.delete(lec)
+    db.commit()
+    log.info("discarded empty live session %s", req.lecture_id)
+    return {"lecture_id": req.lecture_id, "discarded": True}
+
+
 @router.get("/config")
 def live_config() -> dict:
     return {
@@ -323,4 +645,10 @@ def live_config() -> dict:
         "device": settings.whisper_device,
         "realtime": False,
         "expected_delay_note": "one chunk plus processing — typically 11-14s behind",
+        # The camera is optional. Audio is the lecture; vision is evidence added
+        # to it, and the class continues without either the camera or the
+        # vision provider.
+        "board_capture": True,
+        "auto_capture_seconds": AUTO_CAPTURE_SECONDS,
+        "vision_available": bool(settings.has_bob_endpoint or settings.has_gemini),
     }

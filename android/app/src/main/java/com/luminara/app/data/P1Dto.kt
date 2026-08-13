@@ -121,6 +121,32 @@ data class LiveFinishDto(
     val error: String = "",
 )
 
+/** What the vision pass found in one frame of the board. */
+@Serializable
+data class LiveBoardDto(
+    val ok: Boolean = false,
+    @SerialName("capture_id") val captureId: Int = 0,
+    val timecode: String = "",
+    @SerialName("at_seconds") val atSeconds: Double = 0.0,
+    val headline: String = "",
+    val useful: Boolean = false,
+    val auto: Boolean = false,
+    @SerialName("board_text") val boardText: String = "",
+    @SerialName("text_lines") val textLines: Int = 0,
+    val formulas: List<BoardFormulaDto> = emptyList(),
+    val summary: String = "",
+    val engine: String = "",
+    val ms: Long = 0,
+    val error: String = "",
+)
+
+@Serializable
+data class BoardFormulaDto(
+    val latex: String = "",
+    val plain: String = "",
+    val meaning: String = "",
+)
+
 @Serializable
 data class SearchResponseDto(
     val query: String = "",

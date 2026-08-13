@@ -251,8 +251,60 @@ object LuminaraApi {
         }
     }
 
+    /** One frame of the board. Runs on its own request so audio keeps flowing. */
+    suspend fun liveBoard(
+        lectureId: String,
+        jpeg: ByteArray,
+        auto: Boolean,
+    ): ApiResult<LiveBoardDto> = withContext(Dispatchers.IO) {
+        try {
+            val body = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("lecture_id", lectureId)
+                .addFormDataPart("auto", auto.toString())
+                .addFormDataPart(
+                    "image",
+                    "board.jpg",
+                    jpeg.toRequestBody("image/jpeg".toMediaType()),
+                )
+                .build()
+            val request = Request.Builder().url("$baseUrl/api/live/board").post(body).build()
+            client.newCall(request).execute().use { response ->
+                val text = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    return@withContext ApiResult.Err(
+                        readableError(response.code, text),
+                        response.code,
+                    )
+                }
+                ApiResult.Ok(json.decodeFromString<LiveBoardDto>(text))
+            }
+        } catch (e: IOException) {
+            ApiResult.Err("Could not send the board photo — the class is still recording.")
+        } catch (e: Exception) {
+            ApiResult.Err(e.message ?: "Could not read the board")
+        }
+    }
+
+    /** Ask about the class while it is still running. */
+    suspend fun liveAsk(
+        lectureId: String,
+        question: String,
+        language: String,
+    ): ApiResult<AskResponseDto> =
+        call(
+            post(
+                "/api/live/$lectureId/ask",
+                """{"question":${quoted(question)},"language":"$language"}""",
+            )
+        ) { json.decodeFromString(it) }
+
     suspend fun livePause(lectureId: String): ApiResult<String> =
         call(post("/api/live/pause", """{"lecture_id":"$lectureId"}""")) { it }
+
+    /** Tell the backend a session was walked out of, so it is not left open. */
+    suspend fun liveDiscard(lectureId: String): ApiResult<String> =
+        call(post("/api/live/discard", """{"lecture_id":"$lectureId"}""")) { it }
 
     suspend fun liveFinish(lectureId: String): ApiResult<LiveFinishDto> =
         call(post("/api/live/finish", """{"lecture_id":"$lectureId"}""")) {

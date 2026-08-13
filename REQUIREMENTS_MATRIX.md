@@ -134,6 +134,30 @@ threshold skip Whisper entirely, and any transcript that is one phrase repeated 
 | 79 | Video upload | `pipeline/media.py` extracts the audio track to 16 kHz mono WAV using the ffmpeg bundled with `imageio-ffmpeg`; the pipeline itself is unchanged | 6-minute lecture video → 69 segments, 5 concepts, 3 visual observations | ✅ |
 | 80 | Board image from a video | Three frames sampled (30/55/80%) and ranked by edge density; the most board-like is kept and labelled as a frame | Test MP4 → frame 1 chosen, others discarded | 🟡 heuristic; attaching a photo overrides it |
 
+## Live Class V2 — multimodal live classroom
+
+Verified on the physical device against the deployed backend, WiFi off, no `adb reverse`.
+
+| # | Requirement | Implementation | Evidence | Status |
+|---|---|---|---|---|
+| 90 | Live audio + transcript unchanged | Same chunked path, same recorder, same finalise | 12 chunks over 100 s; "Hello." / "So, how are you all guys?" transcribed live | ✅ |
+| 91 | Honest measured latency | `behind_ms` = chunk + measured processing; `/api/live/config` → `realtime: false` | Screen showed **~9–10 s behind**; backend measured **11.3–12.0 s** | ✅ |
+| 92 | Optional camera preview | CameraX bound to the composable's lifecycle; `PreviewView` in COMPATIBLE mode so it stays inside its card | Preview visible in a 150 dp card above the transcript | ✅ |
+| 93 | Audio continues while vision runs | Board capture is its own request; `/chunk` made sync so it runs in the threadpool, not on the event loop | Backend log interleaves `/api/live/chunk` around `/api/live/board`; line count kept rising during capture | ✅ |
+| 94 | No continuous video upload | Only a single JPEG per capture; no video is ever recorded or streamed | `BoardCamera` exposes preview + `captureJpeg()` only | ✅ |
+| 95 | **Capture Board** | `POST /api/live/board` → existing `vision.analyze` → stored at the lecture timecode | On-device: `00:54 — Chart: Grand Finale Schedule Table` (`bob:premium`) | ✅ |
+| 96 | Compact on-screen result | One-line headline plus a confirmation card | `00:36 — Nothing readable on the board` shown honestly | ✅ |
+| 97 | Periodic visual capture | Opt-in sampler every 12 s; a manual tap always takes priority and the sampler skips while one is in flight | "Also check the board every 12s" toggle | ✅ |
+| 98 | Live timeline | Speech and board moments on one axis, in the existing source vocabulary | `GET /api/live/{id}/timeline`; interleaved cards on screen | ✅ |
+| 99 | Live BOB during class | `POST /api/live/{id}/ask` builds a LectureKnowledge-shaped view of the class so far and reuses the ordinary agent | Mid-class: *"The main formula on the board is T(n) = T(n/2) + O(1)"* (`bob:premium`) | ✅ |
+| 100 | Captures reach the normal pipeline | `_merge_board_captures` → one `VisionResult` → the same fusion; `persist_board_text`/`persist_visuals` shared with the recorded path | Stages `board_text_extracted` and `visuals_analyzed` **done** on a live lecture; 711 chars of board text, chart observation at `Whiteboard · 00:54` | ✅ |
+| 101 | End Class → ordinary lecture | Unchanged `finalize_live` → `_reason_and_publish` | 3 concepts, 5 cross-modal links; retitled from the board: "BOB HACKS'26 Grand Finale Schedule Overview" | ✅ |
+| 102 | My Lectures / BOB / Study Pack | No special-casing for live lectures | In My Lectures; BOB described the board; 2,129 KB study pack | ✅ |
+| 103 | One modality never kills another | Camera failure surfaces on the capture, not the lecture; vision failure keeps the transcript; translation failure keeps the original; `discard` cleans abandoned sessions | Two "nothing readable" captures did not disturb recording | ✅ |
+| 104 | Live translation in V2 | Same `translate_text` path per chunk | Verified through the deployed backend (`bob:fast`, Hindi per chunk). **Not re-exercised on the device** — the room was silent during the Hindi run | 🟡 |
+
+---
+
 ## Public deployment
 
 | # | Requirement | How it is met | Evidence | Status |

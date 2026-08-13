@@ -238,6 +238,35 @@ chunks below a peak/RMS threshold skip transcription entirely, and a transcript 
 repeated is discarded as a recognition artefact. A session that captured no speech refuses to become
 a lecture.
 
+### Board capture during a live class
+
+`POST /api/live/board` takes one frame and runs the **existing** `vision.analyze` over it, storing a
+`BoardCapture` row at the moment of the class it was taken. Three details make this safe:
+
+* **It is a sync endpoint**, so FastAPI runs it in the threadpool. `/chunk` was changed from `async`
+  to sync for the same reason: transcription and translation are blocking calls, and on the event
+  loop they would make a board capture queue behind the audio.
+* **The mime type is sniffed from the bytes**, not the file name. A camera frame is whatever the
+  device encoded, and declaring `image/jpeg` over PNG bytes is rejected by the gateway — which
+  presents as a vision failure rather than the encoding mistake it is.
+* **The frame is rotated upright on the device** before upload. CameraX reports rotation separately
+  from the pixels, and text read sideways is text read wrongly.
+
+At finish, `_merge_board_captures` folds every useful capture into a single `VisionResult` — board
+text labelled with its timecode, each formula and observation carrying a `Whiteboard · MM:SS`
+`source_ref`, duplicates across frames collapsed — and hands it to the same fusion the recorded path
+uses. `persist_board_text` and `persist_visuals` are shared by both paths, so a live lecture writes
+the same observation and formula rows an uploaded one does; without that the knowledge document
+would quietly contain evidence the Visuals and Formulas tabs could not show.
+
+`POST /api/live/{id}/ask` answers **during** the class by building a LectureKnowledge-shaped view of
+what has been captured so far — transcript plus board readings — and passing it to the ordinary
+agent. Nothing is invented: the shape matches, so the citations still point at real moments.
+
+`POST /api/live/discard` removes a session the student walked out of. Without it every re-entry to
+the screen leaves a row in `live` status, indistinguishable from a class in progress; a session that
+recognised speech is marked `abandoned` rather than deleted.
+
 ---
 
 ## 9. Classroom layer
