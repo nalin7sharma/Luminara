@@ -1,8 +1,8 @@
 # Third-party software and services
 
-Luminara is built on the work of others. Nothing listed here is our own work; our contribution is
-the multimodal lecture pipeline, the lecture-knowledge model, the BOB agent design and the Android
-application that presents them.
+Luminara is built on the work of others. Nothing listed here is our own work; our contribution is the
+multimodal lecture pipeline, the lecture-knowledge model, the BOB agent design, the classroom layer
+and the Android application that presents them.
 
 ---
 
@@ -10,13 +10,14 @@ application that presents them.
 
 | Component | Provider | Used for | Licence / terms |
 |---|---|---|---|
-| **IBM Bob** inference gateway | IBM | Board OCR, diagram and graph interpretation, multimodal fusion, translation, and the BOB agent. Model aliases `premium` (Claude Sonnet 4.5), `fast` (Claude Haiku 4.5). | IBM Bob account terms; requires your own API key |
-| **OpenAI Whisper** (`base`) | OpenAI | Speech recognition, run locally on CPU | MIT |
-| **Google Gemini API** | Google | Optional secondary provider, used only if the Bob gateway is unreachable | Google APIs Terms of Service; optional |
-| Anthropic Claude, OpenAI GPT, Google Gemini, IBM Granite | via IBM Bob | Served as model aliases behind the Bob gateway; we do not call these providers directly | Accessed under IBM Bob's terms |
+| **IBM BOB** inference gateway | IBM | Board OCR, diagram and graph interpretation, multimodal fusion, translation and the BOB agent. Model aliases `premium` (vision-capable) and `fast`. | IBM BOB account terms; requires your own API key |
+| **Whisper** (`base`) | Open-source project | Speech recognition, run locally on CPU | MIT |
+| Optional secondary LLM provider | Configurable | Fallback used only when the BOB gateway is unreachable; disabled unless a key is supplied | That provider's terms; optional |
 
-Claude, GPT and Gemini models are reached **only** through the IBM Bob gateway using the account's
-own key. Luminara holds no direct credentials for those providers.
+The BOB gateway serves several third-party foundation models behind its own aliases. Luminara calls
+**only** the gateway, using the account's own key, and holds no direct credentials for any of the
+underlying model vendors. The exact alias catalogue for a given key comes from
+`GET /inference/v1/model/info`.
 
 ---
 
@@ -28,14 +29,20 @@ own key. Luminara holds no direct credentials for those providers.
 | Uvicorn | ASGI server | BSD-3-Clause |
 | Pydantic | Request validation | MIT |
 | SQLAlchemy | ORM over SQLite | MIT |
-| httpx | HTTP client for the Bob and Gemini gateways | BSD-3-Clause |
-| openai-whisper | Speech recognition | MIT |
+| httpx | HTTP client for the model gateways | BSD-3-Clause |
+| Whisper | Speech recognition (see `requirements.txt` for the PyPI package name) | MIT |
 | PyTorch | Whisper's runtime | BSD-3-Clause |
-| NumPy | Audio decoding and resampling | BSD-3-Clause |
-| Pillow | Rendering the demo whiteboard image | MIT-CMU (HPND) |
-| OpenCV (`opencv-python`) | Hough-transform pass for diagram node/edge structure | Apache-2.0 |
+| NumPy | Audio decoding and level analysis | BSD-3-Clause |
+| Pillow | Rendering the demo whiteboard image and the QR card | MIT-CMU (HPND) |
+| OpenCV (`opencv-python-headless`) | Hough-transform pass for diagram structure; board-frame scoring | Apache-2.0 |
+| imageio-ffmpeg | Bundled ffmpeg for video / compressed-audio ingest | BSD-2-Clause (ffmpeg itself: LGPL/GPL) |
 | python-multipart | File uploads | Apache-2.0 |
+| qrcode | Generating the download QR code | BSD-3-Clause |
+| huggingface_hub | Optional container-host deployment script | Apache-2.0 |
 | SQLite | Persistence | Public domain |
+
+Package names are as they appear on PyPI; see `backend/requirements.txt` and
+`backend/requirements-prod.txt`.
 
 ---
 
@@ -50,7 +57,7 @@ own key. Luminara holds no direct credentials for those providers.
 | AndroidX Activity Compose, Core KTX | Activity and platform helpers | Apache-2.0 |
 | OkHttp 4.12.0 | HTTP client | Apache-2.0 |
 | kotlinx.serialization | JSON parsing | Apache-2.0 |
-| kotlinx.coroutines | Concurrency | Apache-2.0 |
+| kotlinx.coroutines | Concurrency, live capture loops | Apache-2.0 |
 | Coil 2.6.0 | Loading the whiteboard image | Apache-2.0 |
 | Kotlin 1.9.24, AGP 8.5.2, Gradle 8.7 | Build toolchain | Apache-2.0 |
 
@@ -60,9 +67,14 @@ own key. Luminara holds no direct credentials for those providers.
 
 | Tool | Used for |
 |---|---|
+| Chrome or Edge (headless) | Converting the study pack's print-designed HTML to PDF — whichever is already installed |
+| Cloudflare Tunnel (`cloudflared`) | Publishing the local backend on public HTTPS for the demo |
 | Windows SAPI (`System.Speech.Synthesis`) | Synthesising the demo lecture narration — an *input* to the pipeline |
 | Windows system fonts (Ink Free, Segoe Print, Comic Sans MS) | Rendering handwriting on the demo whiteboard image |
+| Noto Sans Devanagari / Bengali | Shaping Indic text in the containerised study-pack render |
 | Android SDK, platform-tools, emulator | Building, installing and demonstrating the app |
+
+`cloudflared` is downloaded rather than vendored; it is not committed to this repository.
 
 ---
 
@@ -70,8 +82,8 @@ own key. Luminara holds no direct credentials for those providers.
 
 The demo lecture is original material written for this project:
 
-* The spoken script (`LECTURE_SCRIPT` in `backend/scripts/make_demo_assets.py`) is ours, and is
-  narrated by the Windows SAPI voice.
+* The spoken script (`LECTURE_SCRIPT` in `backend/scripts/make_demo_assets.py`) is ours, narrated by
+  the Windows SAPI voice.
 * The whiteboard image is generated by our own Pillow rendering code in the same file.
 * The subject matter — binary search, its `O(log n)` complexity and the recurrence
   `T(n) = T(n/2) + O(1)` — is standard computer science, not attributable to any particular source.
@@ -83,8 +95,9 @@ used anywhere in this project.
 
 ## Attribution notes
 
-* "IBM" and "IBM Bob" are trademarks of International Business Machines Corporation. Luminara is an
+* "IBM" and "IBM BOB" are trademarks of International Business Machines Corporation. Luminara is an
   independent hackathon project and is not affiliated with or endorsed by IBM.
-* "Claude" is a trademark of Anthropic, "GPT" of OpenAI, "Gemini" of Google. These models are
-  accessed as aliases through the IBM Bob gateway.
+* Foundation-model names surfaced as aliases by the BOB gateway are trademarks of their respective
+  owners; they are reached through IBM BOB, never called directly by Luminara.
 * Android, Jetpack Compose and Material Design are trademarks of Google LLC.
+* Cloudflare and Cloudflare Tunnel are trademarks of Cloudflare, Inc.

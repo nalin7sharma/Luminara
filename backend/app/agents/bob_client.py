@@ -33,9 +33,12 @@ def _content_parts(text: str, images: list[str | Path] | None) -> list[dict]:
     parts: list[dict] = [{"type": "text", "text": text}]
     for image in images or []:
         try:
+            from ..llm import sniff_image_mime   # local import keeps the modules acyclic
+
             p = Path(image)
-            mime = "image/png" if p.suffix.lower() == ".png" else "image/jpeg"
-            data = base64.b64encode(p.read_bytes()).decode("ascii")
+            raw = p.read_bytes()
+            mime = sniff_image_mime(raw, p.suffix)
+            data = base64.b64encode(raw).decode("ascii")
             parts.append(
                 {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{data}"}}
             )

@@ -93,8 +93,13 @@ fun OnboardingScreen(
                 )
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    "Luminara understands what your professor says, writes and draws — " +
-                        "then gives you the whole lecture in the language you think in.",
+                    if (role == "teacher") {
+                        "Luminara listens to your class, reads your board, and hands every " +
+                            "student the whole lecture in the language they think in."
+                    } else {
+                        "Luminara understands what your professor says, writes and draws — " +
+                            "then gives you the whole lecture in the language you think in."
+                    },
                     style = MaterialTheme.typography.bodyLarge,
                     color = TextSecondary,
                 )
@@ -161,7 +166,7 @@ fun OnboardingScreen(
             item {
                 Spacer(Modifier.height(24.dp))
                 Text(
-                    "I LEARN BEST IN",
+                    if (role == "teacher") "MY CLASS LANGUAGE" else "I LEARN BEST IN",
                     style = MaterialTheme.typography.labelSmall,
                     color = TextFaint,
                     letterSpacing = 1.6.sp,
@@ -200,8 +205,13 @@ fun OnboardingScreen(
                     )
                     Spacer(Modifier.width(10.dp))
                     Text(
-                        "Formulas and technical terms stay in their original notation — " +
-                            "you get the explanation in your language, not a mistranslated equation.",
+                        if (role == "teacher") {
+                            "Formulas and technical terms stay in their original notation, so a " +
+                                "translated lecture never mangles your mathematics."
+                        } else {
+                            "Formulas and technical terms stay in their original notation — " +
+                                "you get the explanation in your language, not a mistranslated equation."
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         color = TextFaint,
                         fontSize = 13.sp,
@@ -218,7 +228,7 @@ fun OnboardingScreen(
                     colors = ButtonDefaults.buttonColors(containerColor = Violet),
                 ) {
                     Text(
-                        "Start learning",
+                        if (role == "teacher") "Start teaching" else "Start learning",
                         style = MaterialTheme.typography.labelLarge,
                         fontSize = 16.sp,
                     )

@@ -3,6 +3,7 @@ package com.luminara.app.data
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import com.luminara.app.BuildConfig
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
@@ -23,8 +24,17 @@ sealed interface ApiResult<out T> {
 
 object LuminaraApi {
 
-    /** 10.0.2.2 is the host machine as seen from the Android emulator. */
-    const val DEFAULT_BASE_URL = "http://10.0.2.2:8000"
+    /**
+     * Where this build talks to by default.
+     *
+     * Release builds ship the deployed HTTPS backend, so a judge installs the
+     * APK and it simply works — no USB, no LAN address, no settings. Debug
+     * builds keep pointing at the development machine.
+     */
+    val DEFAULT_BASE_URL: String = BuildConfig.API_BASE_URL
+
+    /** Development convenience only; never used by a release build. */
+    val isDebugBuild: Boolean = BuildConfig.DEBUG
 
     @Volatile
     var baseUrl: String = DEFAULT_BASE_URL
@@ -241,8 +251,60 @@ object LuminaraApi {
         }
     }
 
+    /** One frame of the board. Runs on its own request so audio keeps flowing. */
+    suspend fun liveBoard(
+        lectureId: String,
+        jpeg: ByteArray,
+        auto: Boolean,
+    ): ApiResult<LiveBoardDto> = withContext(Dispatchers.IO) {
+        try {
+            val body = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("lecture_id", lectureId)
+                .addFormDataPart("auto", auto.toString())
+                .addFormDataPart(
+                    "image",
+                    "board.jpg",
+                    jpeg.toRequestBody("image/jpeg".toMediaType()),
+                )
+                .build()
+            val request = Request.Builder().url("$baseUrl/api/live/board").post(body).build()
+            client.newCall(request).execute().use { response ->
+                val text = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    return@withContext ApiResult.Err(
+                        readableError(response.code, text),
+                        response.code,
+                    )
+                }
+                ApiResult.Ok(json.decodeFromString<LiveBoardDto>(text))
+            }
+        } catch (e: IOException) {
+            ApiResult.Err("Could not send the board photo — the class is still recording.")
+        } catch (e: Exception) {
+            ApiResult.Err(e.message ?: "Could not read the board")
+        }
+    }
+
+    /** Ask about the class while it is still running. */
+    suspend fun liveAsk(
+        lectureId: String,
+        question: String,
+        language: String,
+    ): ApiResult<AskResponseDto> =
+        call(
+            post(
+                "/api/live/$lectureId/ask",
+                """{"question":${quoted(question)},"language":"$language"}""",
+            )
+        ) { json.decodeFromString(it) }
+
     suspend fun livePause(lectureId: String): ApiResult<String> =
         call(post("/api/live/pause", """{"lecture_id":"$lectureId"}""")) { it }
+
+    /** Tell the backend a session was walked out of, so it is not left open. */
+    suspend fun liveDiscard(lectureId: String): ApiResult<String> =
+        call(post("/api/live/discard", """{"lecture_id":"$lectureId"}""")) { it }
 
     suspend fun liveFinish(lectureId: String): ApiResult<LiveFinishDto> =
         call(post("/api/live/finish", """{"lecture_id":"$lectureId"}""")) {

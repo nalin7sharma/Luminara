@@ -238,6 +238,13 @@ fun LuminaraApp(vm: LuminaraViewModel = viewModel()) {
                 },
                 onLeave = vm::abandonLive,
                 onBack = { nav.popBackStack() },
+                onCaptureBoard = { camera -> vm.captureBoard(camera) },
+                onCameraReady = vm::onCameraReady,
+                onCameraStopped = vm::stopCamera,
+                onToggleAutoCapture = { camera -> vm.toggleAutoCapture(camera) },
+                onAsk = vm::askLive,
+                onDismissAnswer = vm::clearLiveAnswer,
+                onDismissCapture = vm::dismissCaptureToast,
             )
         }
 

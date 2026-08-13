@@ -319,10 +319,18 @@ and are never translated.</footer>"""
 
 
 def find_browser() -> str | None:
+    # In a container the browser is wherever the image put it; CHROME_BIN lets
+    # the deployment say so instead of us guessing Windows paths.
+    from os import environ
+
+    configured = environ.get("CHROME_BIN", "").strip()
+    if configured and Path(configured).exists():
+        return configured
+
     for candidate in BROWSERS:
         if Path(candidate).exists():
             return candidate
-    for name in ("chrome", "msedge", "chromium", "google-chrome"):
+    for name in ("chromium", "chromium-browser", "chrome", "google-chrome", "msedge"):
         found = shutil.which(name)
         if found:
             return found

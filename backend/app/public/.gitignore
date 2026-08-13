@@ -1,0 +1,2 @@
+# APK is published into this directory at deploy time, not committed.
+*.apk

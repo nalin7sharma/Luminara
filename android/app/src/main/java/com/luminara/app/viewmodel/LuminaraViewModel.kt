@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.luminara.app.data.ApiResult
 import com.luminara.app.data.AuthResponseDto
+import com.luminara.app.data.BoardCamera
 import com.luminara.app.data.ClassDetailDto
 import com.luminara.app.data.ClassDto
 import com.luminara.app.data.ConfigDto
@@ -52,6 +53,18 @@ data class LiveLine(
     val error: String = "",
 )
 
+/** One board reading, pinned to the moment of the class it was taken. */
+data class BoardMoment(
+    val captureId: Int,
+    val timecode: String,
+    val headline: String,
+    val useful: Boolean,
+    val auto: Boolean,
+    val engine: String = "",
+    val formula: String = "",
+    val error: String = "",
+)
+
 data class LiveState(
     val lectureId: String,
     val language: String,
@@ -65,6 +78,20 @@ data class LiveState(
     val behindSec: Double = 0.0,
     val level: Float = 0f,
     val lines: List<LiveLine> = emptyList(),
+    // --- board -----------------------------------------------------------
+    val cameraOn: Boolean = false,
+    val cameraError: String = "",
+    val capturing: Boolean = false,
+    val autoCapture: Boolean = false,
+    val autoCaptureSeconds: Int = 12,
+    val boards: List<BoardMoment> = emptyList(),
+    /** Set briefly after a capture so the screen can confirm it visually. */
+    val lastCapture: BoardMoment? = null,
+    // --- live BOB --------------------------------------------------------
+    val asking: Boolean = false,
+    val liveAnswer: String = "",
+    val liveAnswerEngine: String = "",
+    val liveQuestion: String = "",
     val error: String? = null,
 ) {
     /** Honest figure: the chunk still being spoken, plus what processing measured. */
@@ -129,11 +156,20 @@ data class UiState(
     val readyLectures get() = lectures.filter { it.status == "ready" }
 }
 
-/** Hosts tried automatically when the configured backend does not answer. */
-private val BACKEND_CANDIDATES = listOf(
-    "http://10.0.2.2:8000",   // Android emulator -> host machine
-    "http://127.0.0.1:8000",  // physical device with `adb reverse tcp:8000 tcp:8000`
-)
+/**
+ * Development-only fallbacks. A release build points at the deployed HTTPS
+ * backend and must never silently wander onto a localhost address, so this list
+ * is empty outside debug builds.
+ */
+private val BACKEND_CANDIDATES: List<String> =
+    if (LuminaraApi.isDebugBuild) {
+        listOf(
+            "http://10.0.2.2:8000",   // Android emulator -> host machine
+            "http://127.0.0.1:8000",  // physical device with `adb reverse tcp:8000 tcp:8000`
+        )
+    } else {
+        emptyList()
+    }
 
 class LuminaraViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -644,6 +680,7 @@ class LuminaraViewModel(app: Application) : AndroidViewModel(app) {
     private var uploadJob: Job? = null
     private var readJob: Job? = null
     private var tickJob: Job? = null
+    private var autoCaptureJob: Job? = null
 
     /** Set synchronously: a state flag would let two callers both pass the guard
      *  before the first one's update lands, and start two recorders. */
@@ -753,6 +790,154 @@ class LuminaraViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
 
+    // ---- board capture ---------------------------------------------------
+
+    /**
+     * Read the board once.
+     *
+     * Runs as its own request while the recorder keeps filling chunks, so the
+     * class is never paused to look at the board. A failure is surfaced on the
+     * capture, not on the lecture: losing the camera must not end the class.
+     */
+    fun captureBoard(camera: BoardCamera, auto: Boolean = false) {
+        val live = _state.value.live ?: return
+        if (live.capturing || !live.recording) return
+        // A manual capture always wins; the sampler simply skips this round.
+        _state.update { it.copy(live = it.live?.copy(capturing = true)) }
+
+        viewModelScope.launch {
+            val jpeg = camera.captureJpeg()
+            if (jpeg == null) {
+                _state.update {
+                    it.copy(
+                        live = it.live?.copy(
+                            capturing = false,
+                            cameraError = camera.lastError.ifBlank { "the camera did not respond" },
+                        )
+                    )
+                }
+                return@launch
+            }
+            when (val res = LuminaraApi.liveBoard(live.lectureId, jpeg, auto)) {
+                is ApiResult.Err -> _state.update {
+                    it.copy(live = it.live?.copy(capturing = false, cameraError = res.message))
+                }
+                is ApiResult.Ok -> {
+                    val dto = res.value
+                    val moment = BoardMoment(
+                        captureId = dto.captureId,
+                        timecode = dto.timecode,
+                        headline = dto.headline,
+                        useful = dto.useful,
+                        auto = dto.auto,
+                        engine = dto.engine,
+                        formula = dto.formulas.firstOrNull()
+                            ?.let { f -> f.plain.ifBlank { f.latex } }
+                            .orEmpty(),
+                        error = dto.error,
+                    )
+                    _state.update { st ->
+                        val cur = st.live ?: return@update st
+                        st.copy(
+                            live = cur.copy(
+                                capturing = false,
+                                cameraError = "",
+                                // An automatic frame that found nothing is not
+                                // worth a line on the timeline; a tap always is.
+                                boards = if (moment.useful || !auto) cur.boards + moment
+                                else cur.boards,
+                                lastCapture = moment,
+                            )
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun onCameraReady(error: String?) {
+        _state.update {
+            it.copy(
+                live = it.live?.copy(
+                    cameraOn = error == null,
+                    cameraError = error.orEmpty(),
+                )
+            )
+        }
+    }
+
+    fun stopCamera() {
+        autoCaptureJob?.cancel()
+        autoCaptureJob = null
+        _state.update { it.copy(live = it.live?.copy(cameraOn = false, autoCapture = false)) }
+    }
+
+    /** Sample a frame every few seconds. Manual capture always takes priority. */
+    fun toggleAutoCapture(camera: BoardCamera) {
+        val live = _state.value.live ?: return
+        val on = !live.autoCapture
+        _state.update { it.copy(live = it.live?.copy(autoCapture = on)) }
+        autoCaptureJob?.cancel()
+        if (!on) {
+            autoCaptureJob = null
+            return
+        }
+        autoCaptureJob = viewModelScope.launch {
+            while (isActive) {
+                delay(live.autoCaptureSeconds * 1000L)
+                val cur = _state.value.live ?: return@launch
+                if (!cur.recording || cur.paused || cur.capturing || !cur.cameraOn) continue
+                captureBoard(camera, auto = true)
+            }
+        }
+    }
+
+    fun dismissCaptureToast() {
+        _state.update { it.copy(live = it.live?.copy(lastCapture = null)) }
+    }
+
+    // ---- live BOB --------------------------------------------------------
+
+    /** Ask about the class so far. Answers only from what has been captured. */
+    fun askLive(question: String) {
+        val live = _state.value.live ?: return
+        if (question.isBlank() || live.asking) return
+        _state.update {
+            it.copy(
+                live = it.live?.copy(asking = true, liveQuestion = question, liveAnswer = "")
+            )
+        }
+        viewModelScope.launch {
+            when (val res = LuminaraApi.liveAsk(live.lectureId, question, live.language)) {
+                is ApiResult.Err -> _state.update {
+                    it.copy(
+                        live = it.live?.copy(
+                            asking = false,
+                            liveAnswer = "",
+                            liveAnswerEngine = "",
+                            error = res.message,
+                        )
+                    )
+                }
+                is ApiResult.Ok -> _state.update {
+                    it.copy(
+                        live = it.live?.copy(
+                            asking = false,
+                            liveAnswer = res.value.answer,
+                            liveAnswerEngine = res.value.engine,
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    fun clearLiveAnswer() {
+        _state.update {
+            it.copy(live = it.live?.copy(liveAnswer = "", liveQuestion = "", liveAnswerEngine = ""))
+        }
+    }
+
     fun togglePauseLive() {
         val live = _state.value.live ?: return
         val paused = !live.paused
@@ -770,6 +955,8 @@ class LuminaraViewModel(app: Application) : AndroidViewModel(app) {
                 it.copy(live = it.live?.copy(finishing = true, recording = false, paused = false))
             }
             tickJob?.cancel()
+            autoCaptureJob?.cancel()
+            autoCaptureJob = null
             recorder?.paused = false
             recorder?.stop()          // read loop sends the tail, then closes the channel
             recorder = null
@@ -806,13 +993,21 @@ class LuminaraViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Leaving the screen without finishing must not leave the mic running. */
     fun abandonLive() {
+        val abandoned = _state.value.live
         liveStarting = false
         tickJob?.cancel()
+        autoCaptureJob?.cancel()
+        autoCaptureJob = null
         recorder?.stop()
         recorder = null
         readJob?.cancel()
         uploadJob?.cancel()
         _state.update { it.copy(live = null) }
+        // Tell the backend, or every re-entry to the screen leaves a session
+        // sitting in `live` forever. Fire-and-forget: the student has gone.
+        abandoned?.lectureId?.let { id ->
+            viewModelScope.launch { LuminaraApi.liveDiscard(id) }
+        }
     }
 
     // -- P1: script -------------------------------------------------------

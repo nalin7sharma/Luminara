@@ -16,13 +16,45 @@ android {
         versionName = "1.0"
     }
 
+    // The deployed backend. Override without editing this file:
+    //   ./gradlew assembleRelease -PluminaraApiBase=https://your-backend
+    // This is a public URL, not a secret — no key ever reaches the APK.
+    val prodApiBase = (project.findProperty("luminaraApiBase") as String?)
+        ?: "https://REPLACE-WITH-DEPLOYED-BACKEND"
+
+    signingConfigs {
+        create("release") {
+            // Supplied via ~/.gradle/gradle.properties or -P flags, never committed.
+            val storePath = project.findProperty("luminaraKeystore") as String?
+            if (storePath != null && file(storePath).exists()) {
+                storeFile = file(storePath)
+                storePassword = project.findProperty("luminaraKeystorePassword") as String?
+                keyAlias = project.findProperty("luminaraKeyAlias") as String?
+                keyPassword = project.findProperty("luminaraKeyPassword") as String?
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            buildConfigField("String", "API_BASE_URL", "\"$prodApiBase\"")
+            // Fall back to debug signing so a release build is still installable
+            // when no keystore has been configured yet.
+            signingConfig = if ((project.findProperty("luminaraKeystore") as String?)
+                    ?.let { file(it).exists() } == true
+            ) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
         debug {
             isMinifyEnabled = false
+            // Local development: the emulator host. The app also probes
+            // 127.0.0.1 for `adb reverse`, but only in debug builds.
+            buildConfigField("String", "API_BASE_URL", "\"http://10.0.2.2:8000\"")
         }
     }
 
@@ -36,6 +68,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.14"
@@ -68,6 +101,14 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
 
     implementation("io.coil-kt:coil-compose:2.6.0")
+
+    // Live Class: board capture. camera-view gives the PreviewView, camera-lifecycle
+    // binds it to the composable's lifecycle so the camera is released with the screen.
+    val cameraX = "1.3.4"
+    implementation("androidx.camera:camera-core:$cameraX")
+    implementation("androidx.camera:camera-camera2:$cameraX")
+    implementation("androidx.camera:camera-lifecycle:$cameraX")
+    implementation("androidx.camera:camera-view:$cameraX")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
